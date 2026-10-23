@@ -30,5 +30,7 @@ void schedtune_dequeue_task(struct task_struct *p, int cpu);
 #define schedtune_enqueue_task(task, cpu) do { } while (0)
 #define schedtune_dequeue_task(task, cpu) do { } while (0)
 
+#ifndef CONFIG_SCHED_WALT
 #define stune_util(cpu, other_util, walt_load) cpu_util_cfs(cpu_rq(cpu))
+#endif
 #endif /* CONFIG_SCHED_TUNE */
