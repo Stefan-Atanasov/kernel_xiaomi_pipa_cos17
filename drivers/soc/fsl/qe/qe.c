@@ -30,7 +30,7 @@
 #include <linux/of_platform.h>
 #include <asm/irq.h>
 #include <asm/page.h>
-#include <asm/pgtable.h>
+#include <linux/pgtable.h>
 #include <soc/fsl/qe/immap_qe.h>
 #include <soc/fsl/qe/qe.h>
 #include <asm/prom.h>
@@ -94,6 +94,9 @@ void qe_reset(void)
 {
 	if (qe_immr == NULL)
 		qe_immr = ioremap(get_qe_base(), QE_IMMAP_SIZE);
+
+	if (!qe_immr)
+		panic("QE:ioremap failed!");
 
 	qe_snums_init();
 

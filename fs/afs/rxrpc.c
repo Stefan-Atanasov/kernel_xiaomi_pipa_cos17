@@ -16,6 +16,7 @@
 #include <net/af_rxrpc.h>
 #include "internal.h"
 #include "afs_cm.h"
+#include "protocol_yfs.h"
 
 struct workqueue_struct *afs_async_calls;
 
@@ -42,6 +43,7 @@ int afs_open_socket(struct afs_net *net)
 	struct sockaddr_rxrpc srx;
 	struct socket *socket;
 	unsigned int min_level;
+	u16 service_upgrade[2];
 	int ret;
 
 	_enter("");
@@ -75,6 +77,19 @@ int afs_open_socket(struct afs_net *net)
 	if (ret < 0)
 		goto error_2;
 
+	srx.srx_service = YFS_CM_SERVICE;
+	ret = kernel_bind(socket, (struct sockaddr *) &srx, sizeof(srx));
+	if (ret < 0)
+		goto error_2;
+
+	service_upgrade[0] = CM_SERVICE;
+	service_upgrade[1] = YFS_CM_SERVICE;
+	ret = kernel_setsockopt(socket, SOL_RXRPC, RXRPC_UPGRADEABLE_SERVICE,
+				(void *)service_upgrade, sizeof(service_upgrade));
+	if (ret < 0)
+		goto error_2;
+
+
 	rxrpc_kernel_new_call_notification(socket, afs_rx_new_call,
 					   afs_rx_discard_new_call);
 
@@ -101,8 +116,14 @@ void afs_close_socket(struct afs_net *net)
 {
 	_enter("");
 
+	cancel_work_sync(&net->charge_preallocation_work);
+	/* Future work items should now see ->live is false. */
+
 	kernel_listen(net->socket, 0);
+
+	/* Make sure work items are no longer running. */
 	flush_workqueue(afs_async_calls);
+	cancel_work_sync(&net->charge_preallocation_work);
 
 	if (net->spare_incoming_call) {
 		afs_put_call(net->spare_incoming_call);
@@ -723,7 +744,7 @@ void afs_charge_preallocation(struct work_struct *work)
 		container_of(work, struct afs_net, charge_preallocation_work);
 	struct afs_call *call = net->spare_incoming_call;
 
-	for (;;) {
+	while (READ_ONCE(net->live)) {
 		if (!call) {
 			call = afs_alloc_call(net, &afs_RXCMxxxx, GFP_KERNEL);
 			if (!call)
@@ -766,7 +787,8 @@ static void afs_rx_new_call(struct sock *sk, struct rxrpc_call *rxcall,
 {
 	struct afs_net *net = afs_sock2net(sk);
 
-	queue_work(afs_wq, &net->charge_preallocation_work);
+	if (net->live)
+		queue_work(afs_wq, &net->charge_preallocation_work);
 }
 
 /*
@@ -930,7 +952,7 @@ int afs_extract_data(struct afs_call *call, void *buf, size_t count,
 			break;
 		case AFS_CALL_COMPLETE:
 			kdebug("prem complete %d", call->error);
-			return -EIO;
+			return afs_io_error(call, afs_io_error_extract);
 		default:
 			break;
 		}
@@ -944,8 +966,9 @@ int afs_extract_data(struct afs_call *call, void *buf, size_t count,
 /*
  * Log protocol error production.
  */
-noinline int afs_protocol_error(struct afs_call *call, int error)
+noinline int afs_protocol_error(struct afs_call *call, int error,
+				enum afs_eproto_cause cause)
 {
-	trace_afs_protocol_error(call, error, __builtin_return_address(0));
+	trace_afs_protocol_error(call, error, cause);
 	return error;
 }

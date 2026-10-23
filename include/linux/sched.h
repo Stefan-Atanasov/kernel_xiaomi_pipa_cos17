@@ -21,6 +21,7 @@
 #include <linux/seccomp.h>
 #include <linux/nodemask.h>
 #include <linux/rcupdate.h>
+#include <linux/refcount.h>
 #include <linux/resource.h>
 #include <linux/latencytop.h>
 #include <linux/sched/prio.h>
@@ -30,9 +31,6 @@
 #include <linux/task_io_accounting.h>
 #include <linux/rseq.h>
 #include <linux/android_kabi.h>
-#ifdef CONFIG_PACKAGE_RUNTIME_INFO
-#include <linux/pkg_stat.h>
-#endif
 
 /* task_struct member predeclarations (sorted alphabetically): */
 struct audit_context;
@@ -54,7 +52,6 @@ struct reclaim_state;
 struct capture_control;
 struct robust_list_head;
 struct sched_attr;
-struct sched_param;
 struct seq_file;
 struct sighand_struct;
 struct signal_struct;
@@ -367,6 +364,10 @@ enum uclamp_id {
 	UCLAMP_MIN = 0,
 	UCLAMP_MAX,
 	UCLAMP_CNT
+};
+
+struct sched_param {
+	int sched_priority;
 };
 
 struct sched_info {
@@ -838,7 +839,7 @@ struct task_struct {
 	randomized_struct_fields_start
 
 	void				*stack;
-	atomic_t			usage;
+	refcount_t			usage;
 	/* Per task flags (PF_*), defined further below: */
 	unsigned int			flags;
 	unsigned int			ptrace;
@@ -938,6 +939,14 @@ struct task_struct {
 	struct list_head		rcu_tasks_holdout_list;
 #endif /* #ifdef CONFIG_TASKS_RCU */
 
+#ifdef CONFIG_TASKS_TRACE_RCU
+	int				trc_reader_nesting;
+	int				trc_ipi_to_cpu;
+	bool				trc_reader_need_end;
+	bool				trc_reader_checked;
+	struct list_head		trc_holdout_list;
+#endif /* #ifdef CONFIG_TASKS_TRACE_RCU */
+
 	struct sched_info		sched_info;
 
 	struct list_head		tasks;
@@ -980,6 +989,9 @@ struct task_struct {
 
 	/* Unserialized, strictly 'current' */
 
+	/* Save user-dumpable when mm goes away */
+	unsigned			user_dumpable:1;
+
 	/* Bit to tell LSMs we're in execve(): */
 	unsigned			in_execve:1;
 	unsigned			in_iowait:1;
@@ -988,9 +1000,6 @@ struct task_struct {
 #endif
 #ifdef CONFIG_MEMCG
 	unsigned			in_user_fault:1;
-#ifdef CONFIG_MEMCG_KMEM
-	unsigned			memcg_kmem_skip_account:1;
-#endif
 #endif
 #ifdef CONFIG_COMPAT_BRK
 	unsigned			brk_randomized:1;
@@ -1188,6 +1197,7 @@ struct task_struct {
 
 #ifdef CONFIG_TRACE_IRQFLAGS
 	unsigned int			irq_events;
+	unsigned int			hardirq_threaded;
 	unsigned long			hardirq_enable_ip;
 	unsigned long			hardirq_disable_ip;
 	unsigned int			hardirq_enable_event;
@@ -1200,6 +1210,7 @@ struct task_struct {
 	unsigned int			softirq_enable_event;
 	int				softirqs_enabled;
 	int				softirq_context;
+	int				irq_config;
 #endif
 
 #ifdef CONFIG_LOCKDEP
@@ -1392,21 +1403,6 @@ struct task_struct {
 	 */
 	u64				timer_slack_ns;
 	u64				default_timer_slack_ns;
-#ifdef CONFIG_XIAOMI_MIUI
-	unsigned int			top_app;
-	unsigned int			inherit_top_app;
-	unsigned int    		critical_task;
-#endif
-#ifdef CONFIG_PERF_CRITICAL_RT_TASK
-	unsigned int    		critical_rt_task;
-#endif
-#ifdef CONFIG_SF_BINDER
-	unsigned int			sf_binder_task;
-#endif
-#ifdef CONFIG_PERF_HUMANTASK
-	unsigned int 			human_task;
-	unsigned int 			cpux;
-#endif
 
 #ifdef CONFIG_KASAN
 	unsigned int			kasan_depth;
@@ -1523,15 +1519,8 @@ struct task_struct {
 	ANDROID_KABI_RESERVE(3);
 	ANDROID_KABI_RESERVE(4);
 	ANDROID_KABI_RESERVE(5);
-#if defined(CONFIG_KSU_SUSFS)
-	ANDROID_KABI_USE(6, u64 susfs_task_state);
-#else
 	ANDROID_KABI_RESERVE(6);
-#endif // #if defined(CONFIG_KSU_SUSFS)
 #else
-#if defined(CONFIG_KSU_SUSFS)
-	u64 susfs_task_state;
-#endif
 	struct mutex			futex_exit_mutex;
 #endif
 
@@ -1541,25 +1530,12 @@ struct task_struct {
 #else
 	ANDROID_KABI_RESERVE(7);
 #endif
-#ifdef CONFIG_KSU_SUSFS
-	ANDROID_KABI_USE(8, u64 susfs_last_fake_mnt_id);
-#else
 	ANDROID_KABI_RESERVE(8);
-#endif
 
-#ifdef CONFIG_PACKAGE_RUNTIME_INFO
-struct package_runtime_info pkg;
-#endif
 	/*
 	 * New fields for task_struct should be added above here, so that
 	 * they are included in the randomized portion of task_struct.
 	 */
-#if defined(CONFIG_KSU_SUSFS) && !defined(ANDROID_KABI_RESERVE)
-	u64 susfs_task_state;
-#endif
-#if defined(CONFIG_KSU_SUSFS) && !defined(ANDROID_KABI_RESERVE)
-	u64 susfs_last_fake_mnt_id;
-#endif
 	randomized_struct_fields_end
 
 	/* CPU-specific state of this task: */
@@ -1752,6 +1728,7 @@ extern struct pid *cad_pid;
 #define PF_RANDOMIZE		0x00400000	/* Randomize virtual address space */
 #define PF_SWAPWRITE		0x00800000	/* Allowed to write to swap */
 #define PF_MEMSTALL		0x01000000	/* Stalled due to lack of memory */
+#define PF_UMH			0x02000000	/* I'm an Usermodehelper process */
 #define PF_NO_SETAFFINITY	0x04000000	/* Userland is not allowed to meddle with cpus_allowed */
 #define PF_MCE_EARLY		0x08000000      /* Early kill for mce process policy */
 #define PF_WAKE_UP_IDLE         0x10000000	/* TTWU on an idle CPU */
@@ -2298,16 +2275,5 @@ static inline void set_wake_up_idle(bool enabled)
 	else
 		current->flags &= ~PF_WAKE_UP_IDLE;
 }
-
-#ifdef CONFIG_XIAOMI_MIUI
-extern inline bool is_critical_task(struct task_struct *p);
-extern inline bool is_top_app(struct task_struct *p);
-extern inline bool is_inherit_top_app(struct task_struct *p);
-
-#define INHERIT_DEPTH 2
-extern inline void set_inherit_top_app(struct task_struct *p,
-					struct task_struct *from);
-extern inline void restore_inherit_top_app(struct task_struct *p);
-#endif // CONFIG_XIAOMI_MIUI
 
 #endif

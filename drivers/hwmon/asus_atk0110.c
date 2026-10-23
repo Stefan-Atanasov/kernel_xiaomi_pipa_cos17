@@ -1,7 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) 2007-2009 Luca Tettamanti <kronos.it@gmail.com>
  *
- * This file is released under the GPLv2
  * See COPYING in the top level directory of the kernel tree.
  */
 
@@ -1054,6 +1054,9 @@ static int atk_ec_present(struct atk_data *data)
 		union acpi_object *id;
 
 		if (obj->type != ACPI_TYPE_PACKAGE)
+			continue;
+
+		if (!obj->package.count)
 			continue;
 
 		id = &obj->package.elements[0];

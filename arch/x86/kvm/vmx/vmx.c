@@ -26,6 +26,7 @@
 #include <linux/kernel.h>
 #include <linux/mm.h>
 #include <linux/highmem.h>
+#include <linux/objtool.h>
 #include <linux/sched.h>
 #include <linux/sched/smt.h>
 #include <linux/moduleparam.h>
@@ -34,7 +35,6 @@
 #include <linux/slab.h>
 #include <linux/tboot.h>
 #include <linux/hrtimer.h>
-#include <linux/frame.h>
 #include <linux/nospec.h>
 #include "kvm_cache_regs.h"
 #include "x86.h"
@@ -8551,6 +8551,8 @@ static inline void nested_release_vmcs12(struct vcpu_vmx *vmx)
  */
 static void free_nested(struct vcpu_vmx *vmx)
 {
+	struct vmcs *shadow_vmcs;
+
 	if (!vmx->nested.vmxon && !vmx->nested.smm.vmxon)
 		return;
 
@@ -8564,9 +8566,15 @@ static void free_nested(struct vcpu_vmx *vmx)
 	vmx->nested.current_vmptr = -1ull;
 	if (enable_shadow_vmcs) {
 		vmx_disable_shadow_vmcs(vmx);
-		vmcs_clear(vmx->vmcs01.shadow_vmcs);
-		free_vmcs(vmx->vmcs01.shadow_vmcs);
+
+		/*
+		 * Keep the pointer visible until after VMCLEAR, so migration
+		 * can clear an active shadow VMCS on the old CPU.
+		 */
+		shadow_vmcs = vmx->vmcs01.shadow_vmcs;
+		vmcs_clear(shadow_vmcs);
 		vmx->vmcs01.shadow_vmcs = NULL;
+		free_vmcs(shadow_vmcs);
 	}
 	kfree(vmx->nested.cached_vmcs12);
 	kfree(vmx->nested.cached_shadow_vmcs12);

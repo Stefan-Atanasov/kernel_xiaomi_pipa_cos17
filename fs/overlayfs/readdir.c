@@ -658,7 +658,7 @@ static int ovl_fill_real(struct dir_context *ctx, const char *name,
 		container_of(ctx, struct ovl_readdir_translate, ctx);
 	struct dir_context *orig_ctx = rdt->orig_ctx;
 
-	if (rdt->parent_ino && strcmp(name, "..") == 0) {
+	if (rdt->parent_ino && namelen == 2 && !strncmp(name, "..", 2)) {
 		ino = rdt->parent_ino;
 	} else if (rdt->cache) {
 		struct ovl_cache_entry *p;
@@ -895,19 +895,7 @@ static int ovl_dir_open(struct inode *inode, struct file *file)
 	if (!od)
 		return -ENOMEM;
 
-#ifdef CONFIG_KSU_SUSFS_SUS_OVERLAYFS
-	ovl_path_lowerdata(file->f_path.dentry, &realpath);
-	if (likely(realpath.mnt && realpath.dentry)) {
-		// We still use '__OVL_PATH_UPPER' here which should be fine.  
-		type = __OVL_PATH_UPPER;
-		goto bypass_orig_flow;
-	}
-#endif
-
 	type = ovl_path_real(file->f_path.dentry, &realpath);
-#ifdef CONFIG_KSU_SUSFS_SUS_OVERLAYFS
-bypass_orig_flow:
-#endif
 	realfile = ovl_path_open(&realpath, file->f_flags);
 	if (IS_ERR(realfile)) {
 		kfree(od);

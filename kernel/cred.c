@@ -341,13 +341,6 @@ int copy_creds(struct task_struct *p, unsigned long clone_flags)
 		kdebug("share_creds(%p{%d,%d})",
 		       p->cred, atomic_read(&p->cred->usage),
 		       read_cred_subscribers(p->cred));
-#ifdef CONFIG_PACKAGE_RUNTIME_INFO
-		if (user_pkg(p->cred->user->uid.val)) {
-			write_lock_irq(&p->cred->user->pkg.lock);
-			list_add(&p->pkg.list, &p->cred->user->pkg.list);
-			write_unlock_irq(&p->cred->user->pkg.lock);
-		}
-#endif
 		atomic_inc(&p->cred->user->processes);
 		return 0;
 	}
@@ -383,13 +376,6 @@ int copy_creds(struct task_struct *p, unsigned long clone_flags)
 
 	atomic_inc(&new->user->processes);
 	p->cred = p->real_cred = get_cred(new);
-#ifdef CONFIG_PACKAGE_RUNTIME_INFO
-	if (user_pkg(new->user->uid.val)) {
-		write_lock_irq(&new->user->pkg.lock);
-		list_add(&p->pkg.list, &new->user->pkg.list);
-		write_unlock_irq(&new->user->pkg.lock);
-	}
-#endif
 	alter_cred_subscribers(new, 2);
 	validate_creds(new);
 	return 0;
@@ -493,22 +479,8 @@ int commit_creds(struct cred *new)
 		atomic_inc(&new->user->processes);
 	rcu_assign_pointer(task->real_cred, new);
 	rcu_assign_pointer(task->cred, new);
-	if (new->user != old->user) {
-#ifdef CONFIG_PACKAGE_RUNTIME_INFO
-		if (user_pkg(old->user->uid.val)) {
-			write_lock_irq(&old->user->pkg.lock);
-			list_del(&task->pkg.list);
-			write_unlock_irq(&old->user->pkg.lock);
-		}
-
-		if (user_pkg(new->user->uid.val)) {
-			write_lock_irq(&new->user->pkg.lock);
-			list_add(&task->pkg.list, &new->user->pkg.list);
-			write_unlock_irq(&new->user->pkg.lock);
-		}
-#endif
+	if (new->user != old->user)
 		atomic_dec(&old->user->processes);
-	}
 	alter_cred_subscribers(old, -2);
 
 	/* send notifications */
@@ -758,19 +730,6 @@ bool creds_are_invalid(const struct cred *cred)
 {
 	if (cred->magic != CRED_MAGIC)
 		return true;
-#ifdef CONFIG_SECURITY_SELINUX
-	/*
-	 * cred->security == NULL if security_cred_alloc_blank() or
-	 * security_prepare_creds() returned an error.
-	 */
-	if (selinux_is_enabled() && cred->security) {
-		if ((unsigned long) cred->security < PAGE_SIZE)
-			return true;
-		if ((*(u32 *)cred->security & 0xffffff00) ==
-		    (POISON_FREE << 24 | POISON_FREE << 16 | POISON_FREE << 8))
-			return true;
-	}
-#endif
 	return false;
 }
 EXPORT_SYMBOL(creds_are_invalid);

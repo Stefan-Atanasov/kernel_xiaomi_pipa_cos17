@@ -1410,51 +1410,6 @@ static void dequeue_rt_entity(struct sched_rt_entity *rt_se, unsigned int flags)
 	enqueue_top_rt_rq(&rq->rt);
 }
 
-#ifdef CONFIG_XIAOMI_MIUI
-static inline void
-update_stats_enqueue_wakeup(struct rq *rq, struct task_struct *p)
-{
-#ifdef CONFIG_SCHEDSTATS
-	struct sched_entity *se = &p->se;
-	if (se->statistics.sleep_start) {
-		u64 delta = rq_clock(rq) - se->statistics.sleep_start;
-		if ((s64)delta < 0)
-			delta = 0;
-
-		if (unlikely(delta > se->statistics.sleep_max))
-			se->statistics.sleep_max = delta;
-
-		se->statistics.sleep_start = 0;
-		se->statistics.sum_sleep_runtime += delta;
-
-		account_scheduler_latency(p, delta >> 10, 1);
-		trace_sched_stat_sleep(p, delta);
-	}
-	if (se->statistics.block_start) {
-		u64 delta = rq_clock(rq) - se->statistics.block_start;
-		if ((s64)delta < 0)
-			delta = 0;
-
-		if (unlikely(delta > se->statistics.block_max))
-			se->statistics.block_max = delta;
-
-		se->statistics.block_start = 0;
-		se->statistics.sum_sleep_runtime += delta;
-
-		if (p->in_iowait) {
-			se->statistics.iowait_sum += delta;
-			se->statistics.iowait_count++;
-			trace_sched_stat_iowait(p, delta);
-		}
-
-		account_scheduler_latency(p, delta >> 10, 0);
-		trace_sched_stat_blocked(p, delta);
-		trace_sched_blocked_reason(p);
-	}
-#endif
-}
-#endif
-
 /*
  * Adding/removing a task to/from a priority array:
  */
@@ -1465,12 +1420,8 @@ enqueue_task_rt(struct rq *rq, struct task_struct *p, int flags)
 
 	schedtune_enqueue_task(p, cpu_of(rq));
 
-	if (flags & ENQUEUE_WAKEUP) {
+	if (flags & ENQUEUE_WAKEUP)
 		rt_se->timeout = 0;
-#ifdef CONFIG_XIAOMI_MIUI
-		update_stats_enqueue_wakeup(rq, p);
-#endif
-	}
 
 	enqueue_rt_entity(rt_se, flags);
 	walt_inc_cumulative_runnable_avg(rq, p);
@@ -1479,30 +1430,11 @@ enqueue_task_rt(struct rq *rq, struct task_struct *p, int flags)
 		enqueue_pushable_task(rq, p);
 }
 
-#ifdef CONFIG_XIAOMI_MIUI
-static inline void
-update_stats_dequeue_sleep(struct rq *rq, struct task_struct *p)
-{
-#ifdef CONFIG_SCHEDSTATS
-	struct sched_entity *se = &p->se;
-	if (p->state & TASK_INTERRUPTIBLE)
-		se->statistics.sleep_start = rq_clock(rq);
-	if (p->state & TASK_UNINTERRUPTIBLE)
-		se->statistics.block_start = rq_clock(rq);
-#endif
-}
-#endif
-
 static void dequeue_task_rt(struct rq *rq, struct task_struct *p, int flags)
 {
 	struct sched_rt_entity *rt_se = &p->rt;
 
 	schedtune_dequeue_task(p, cpu_of(rq));
-
-#ifdef CONFIG_XIAOMI_MIUI
-	if (flags & DEQUEUE_SLEEP)
-		update_stats_dequeue_sleep(rq, p);
-#endif
 
 	update_curr_rt(rq);
 	dequeue_rt_entity(rt_se, flags);
@@ -2243,6 +2175,7 @@ static void push_rt_tasks(struct rq *rq)
  */
 static int rto_next_cpu(struct root_domain *rd)
 {
+	int this_cpu = smp_processor_id();
 	int next;
 	int cpu;
 
@@ -2265,6 +2198,10 @@ static int rto_next_cpu(struct root_domain *rd)
 		cpu = cpumask_next(rd->rto_cpu, rd->rto_mask);
 
 		rd->rto_cpu = cpu;
+
+		/* Do not send IPI to self */
+		if (cpu == this_cpu)
+			continue;
 
 		if (cpu < nr_cpu_ids)
 			return cpu;
@@ -2764,7 +2701,7 @@ static int tg_rt_schedulable(struct task_group *tg, void *data)
 {
 	struct rt_schedulable_data *d = data;
 	struct task_group *child;
-	unsigned long total, sum = 0;
+	u64 total, sum = 0;
 	u64 period, runtime;
 
 	period = ktime_to_ns(tg->rt_bandwidth.rt_period);
@@ -2983,9 +2920,8 @@ static void sched_rt_do_global(void)
 	raw_spin_unlock_irqrestore(&def_rt_bandwidth.rt_runtime_lock, flags);
 }
 
-int sched_rt_handler(struct ctl_table *table, int write,
-		void __user *buffer, size_t *lenp,
-		loff_t *ppos)
+int sched_rt_handler(struct ctl_table *table, int write, void *buffer,
+		size_t *lenp, loff_t *ppos)
 {
 	int old_period, old_runtime;
 	static DEFINE_MUTEX(mutex);
@@ -3023,9 +2959,8 @@ undo:
 	return ret;
 }
 
-int sched_rr_handler(struct ctl_table *table, int write,
-		void __user *buffer, size_t *lenp,
-		loff_t *ppos)
+int sched_rr_handler(struct ctl_table *table, int write, void *buffer,
+		size_t *lenp, loff_t *ppos)
 {
 	int ret;
 	static DEFINE_MUTEX(mutex);

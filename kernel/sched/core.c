@@ -170,13 +170,15 @@ static void update_rq_clock_task(struct rq *rq, s64 delta)
 #endif
 #ifdef CONFIG_PARAVIRT_TIME_ACCOUNTING
 	if (static_key_false((&paravirt_steal_rq_enabled))) {
-		steal = paravirt_steal_clock(cpu_of(rq));
+		u64 prev_steal;
+
+		steal = prev_steal = paravirt_steal_clock(cpu_of(rq));
 		steal -= rq->prev_steal_time_rq;
 
 		if (unlikely(steal > delta))
 			steal = delta;
 
-		rq->prev_steal_time_rq += steal;
+		rq->prev_steal_time_rq = prev_steal;
 		delta -= steal;
 	}
 #endif
@@ -732,13 +734,6 @@ static void set_load_weight(struct task_struct *p, bool update_load)
 	}
 }
 
-#ifdef CONFIG_MIGT
-void __weak migt_monitor_hook(int enqueue, int cpu, struct task_struct *p,
-			      u64 walltime)
-{ /* do nothing */
-}
-#endif
-
 #ifdef CONFIG_UCLAMP_TASK
 /*
  * Serializes updates of utilization clamp values
@@ -1144,8 +1139,7 @@ static void uclamp_update_root_tg(void) { }
 #endif
 
 int sysctl_sched_uclamp_handler(struct ctl_table *table, int write,
-				void __user *buffer, size_t *lenp,
-				loff_t *ppos)
+				void *buffer, size_t *lenp, loff_t *ppos)
 {
 	bool update_root_tg = false;
 	int old_min, old_max;
@@ -1423,9 +1417,6 @@ static inline void enqueue_task(struct rq *rq, struct task_struct *p, int flags)
 	uclamp_rq_inc(rq, p);
 	p->sched_class->enqueue_task(rq, p, flags);
 	walt_update_last_enqueue(p);
-#ifdef CONFIG_MIGT
-	migt_monitor_hook(1, rq->cpu, p, sched_ktime_clock());
-#endif
 	trace_sched_enq_deq_task(p, 1, cpumask_bits(&p->cpus_allowed)[0]);
 }
 
@@ -1444,9 +1435,6 @@ static inline void dequeue_task(struct rq *rq, struct task_struct *p, int flags)
 #ifdef CONFIG_SCHED_WALT
 	if (p == rq->ed_task)
 		early_detection_notify(rq, sched_ktime_clock());
-#endif
-#ifdef CONFIG_MIGT
-	migt_monitor_hook(0, rq->cpu, p, sched_ktime_clock());
 #endif
 	trace_sched_enq_deq_task(p, 0, cpumask_bits(&p->cpus_allowed)[0]);
 }
@@ -1727,10 +1715,6 @@ void set_cpus_allowed_common(struct task_struct *p, const struct cpumask *new_ma
 {
 	cpumask_copy(&p->cpus_allowed, new_mask);
 	p->nr_cpus_allowed = cpumask_weight(new_mask);
-#ifdef CONFIG_PACKAGE_RUNTIME_INFO
-	p->pkg.migt.flag &= ~MINOR_TASK;
-	cpumask_copy(&p->pkg.migt.cpus_allowed, new_mask);
-#endif
 }
 
 void do_set_cpus_allowed(struct task_struct *p, const struct cpumask *new_mask)
@@ -1837,7 +1821,6 @@ static int __set_cpus_allowed_ptr(struct task_struct *p,
 		/* Need help from migration thread: drop lock and wait. */
 		task_rq_unlock(rq, p, &rf);
 		stop_one_cpu(cpu_of(rq), migration_cpu_stop, &arg);
-		tlb_migrate_finish(p->mm);
 		return 0;
 	} else if (task_on_rq_queued(p)) {
 		/*
@@ -2289,26 +2272,6 @@ int select_task_rq(struct task_struct *p, int cpu, int sd_flags, int wake_flags,
 		   int sibling_count_hint)
 {
 	bool allow_isolated = (p->flags & PF_KTHREAD);
-#ifdef CONFIG_MIGT
-	bool minor_wtask = minor_window_task(p);
-	cpumask_t minor_window_cpumask;
-
-	if (minor_wtask && !(p->pkg.migt.flag & MINOR_TASK)) {
-		p->pkg.migt.flag |= MINOR_TASK;
-		cpumask_copy(&p->pkg.migt.cpus_allowed, &p->cpus_allowed);
-
-		if (get_minor_window_cpumask(p, &minor_window_cpumask)) {
-			cpumask_copy(&p->cpus_allowed, &minor_window_cpumask);
-			p->nr_cpus_allowed = cpumask_weight(&minor_window_cpumask);
-		}
-	}
-
-	if (!minor_wtask && (p->pkg.migt.flag & MINOR_TASK)) {
-		p->pkg.migt.flag &= ~MINOR_TASK;
-		cpumask_copy(&p->cpus_allowed, &p->pkg.migt.cpus_allowed);
-		p->nr_cpus_allowed = cpumask_weight(&p->cpus_allowed);
-	}
-#endif
 
 	lockdep_assert_held(&p->pi_lock);
 
@@ -2997,9 +2960,6 @@ static void __sched_fork(unsigned long clone_flags, struct task_struct *p)
 #endif
 	INIT_LIST_HEAD(&p->se.group_node);
 
-#ifdef CONFIG_PACKAGE_RUNTIME_INFO
-	init_task_runtime_info(p);
-#endif
 #ifdef CONFIG_FAIR_GROUP_SCHED
 	p->se.cfs_rq			= NULL;
 #endif
@@ -3044,7 +3004,7 @@ void set_numabalancing_state(bool enabled)
 
 #ifdef CONFIG_PROC_SYSCTL
 int sysctl_numa_balancing(struct ctl_table *table, int write,
-			 void __user *buffer, size_t *lenp, loff_t *ppos)
+			  void *buffer, size_t *lenp, loff_t *ppos)
 {
 	struct ctl_table t;
 	int err;
@@ -3118,8 +3078,8 @@ static void __init init_schedstats(void)
 }
 
 #ifdef CONFIG_PROC_SYSCTL
-int sysctl_schedstats(struct ctl_table *table, int write,
-			 void __user *buffer, size_t *lenp, loff_t *ppos)
+int sysctl_schedstats(struct ctl_table *table, int write, void *buffer,
+		size_t *lenp, loff_t *ppos)
 {
 	struct ctl_table t;
 	int err;
@@ -3228,7 +3188,7 @@ int sched_fork(unsigned long clone_flags, struct task_struct *p)
 	return 0;
 }
 
-unsigned long to_ratio(u64 period, u64 runtime)
+u64 to_ratio(u64 period, u64 runtime)
 {
 	if (runtime == RUNTIME_INF)
 		return BW_UNIT;
@@ -3422,7 +3382,7 @@ prepare_lock_switch(struct rq *rq, struct task_struct *next, struct rq_flags *rf
 	 * do an early lockdep release here:
 	 */
 	rq_unpin_lock(rq, rf);
-	spin_release(&rq->lock.dep_map, 1, _THIS_IP_);
+	spin_release(&rq->lock.dep_map, _THIS_IP_);
 #ifdef CONFIG_DEBUG_SPINLOCK
 	/* this is a valid case when another task releases the spinlock */
 	rq->lock.owner = next;
@@ -5782,30 +5742,9 @@ long sched_setaffinity(pid_t pid, const struct cpumask *in_mask)
 	if (retval)
 		goto out_free_new_mask;
 
-#ifdef CONFIG_PACKAGE_RUNTIME_INFO
-	if (minor_window_task(p)) {
-		retval = -EPERM;
-		cpuset_cpus_allowed(p, cpus_allowed);
-		cpumask_and(new_mask, in_mask, cpus_allowed);
-		cpumask_andnot(&allowed_mask, new_mask, cpu_isolated_mask);
-		dest_cpu = cpumask_any_and(cpu_active_mask, &allowed_mask);
-		if (dest_cpu < nr_cpu_ids) {
-			 cpuset_cpus_allowed(p, cpus_allowed);
-			  if (!cpumask_subset(new_mask, cpus_allowed))
-				  cpumask_copy(new_mask, cpus_allowed);
-			  cpumask_copy(&p->pkg.migt.cpus_allowed, new_mask);
-		}
-		p->pkg.migt.flag |= MINOR_TASK;
-		cpumask_copy(&p->pkg.migt.cpus_allowed, new_mask);
-		goto out_free_new_mask;
-	}
-#endif
 
 	cpuset_cpus_allowed(p, cpus_allowed);
 	cpumask_and(new_mask, in_mask, cpus_allowed);
-#ifdef CONFIG_XIAOMI_MIUI
-	trace_sched_setaffinity(pid, in_mask);
-#endif
 
 	/*
 	 * Since bandwidth control happens on root_domain basis,
@@ -5895,7 +5834,7 @@ bool is_sched_lib_based_app(pid_t pid)
 	if (!mm)
 		goto put_task_struct;
 
-	down_read(&mm->mmap_sem);
+	mmap_read_lock(mm);
 	for (vma = mm->mmap; vma ; vma = vma->vm_next) {
 		if (vma->vm_file && vma->vm_flags & VM_EXEC) {
 			name = d_path(&vma->vm_file->f_path,
@@ -5917,7 +5856,7 @@ bool is_sched_lib_based_app(pid_t pid)
 	}
 
 release_sem:
-	up_read(&mm->mmap_sem);
+	mmap_read_unlock(mm);
 	mmput(mm);
 put_task_struct:
 	put_task_struct(p);
@@ -6066,7 +6005,7 @@ SYSCALL_DEFINE0(sched_yield)
 #ifndef CONFIG_PREEMPT
 int __sched _cond_resched(void)
 {
-	if (should_resched(0)) {
+	if (should_resched(0) && !irqs_disabled()) {
 		preempt_schedule_common();
 		return 1;
 	}
@@ -6463,34 +6402,6 @@ void show_state_filter(unsigned long state_filter)
 	 */
 	if (!state_filter)
 		debug_show_all_locks();
-}
-
-void show_state_filter_single(unsigned long state_filter)
-{
-	struct task_struct *g, *p;
-
-#if BITS_PER_LONG == 32
-	printk(KERN_INFO
-		"  task                PC stack   pid father\n");
-#else
-	printk(KERN_INFO
-		"  task                        PC stack   pid father\n");
-#endif
-	rcu_read_lock();
-	for_each_process_thread(g, p) {
-		/*
-		 * reset the NMI-timeout, listing all files on a slow
-		 * console might take a lot of time:
-		 * Also, reset softlockup watchdogs on all CPUs, because
-		 * another CPU might be blocked waiting for us to process
-		 * an IPI.
-		 */
-		touch_nmi_watchdog();
-		touch_all_softlockup_watchdogs();
-		if (p->state == state_filter)
-			sched_show_task(p);
-	}
-	rcu_read_unlock();
 }
 
 /**
@@ -7602,6 +7513,34 @@ void ___might_sleep(const char *file, int line, int preempt_offset)
 	add_taint(TAINT_WARN, LOCKDEP_STILL_OK);
 }
 EXPORT_SYMBOL(___might_sleep);
+
+void __cant_sleep(const char *file, int line, int preempt_offset)
+{
+	static unsigned long prev_jiffy;
+
+	if (irqs_disabled())
+		return;
+
+	if (!IS_ENABLED(CONFIG_PREEMPT_COUNT))
+		return;
+
+	if (preempt_count() > preempt_offset)
+		return;
+
+	if (time_before(jiffies, prev_jiffy + HZ) && prev_jiffy)
+		return;
+	prev_jiffy = jiffies;
+
+	printk(KERN_ERR "BUG: assuming atomic context at %s:%d\n", file, line);
+	printk(KERN_ERR "in_atomic(): %d, irqs_disabled(): %d, pid: %d, name: %s\n",
+			in_atomic(), irqs_disabled(),
+			current->pid, current->comm);
+
+	debug_show_held_locks(current);
+	dump_stack();
+	add_taint(TAINT_WARN, LOCKDEP_STILL_OK);
+}
+EXPORT_SYMBOL_GPL(__cant_sleep);
 #endif
 
 #ifdef CONFIG_MAGIC_SYSRQ
@@ -8843,42 +8782,3 @@ void sched_exit(struct task_struct *p)
 #endif /* CONFIG_SCHED_WALT */
 
 __read_mostly bool sched_predl = 1;
-
-#ifdef CONFIG_XIAOMI_MIUI
-inline bool is_critical_task(struct task_struct *p)
-{
-	return is_top_app(p) || is_inherit_top_app(p);
-}
-
-inline bool is_top_app(struct task_struct *p)
-{
-	return p && p->top_app > 0;
-}
-
-inline bool is_inherit_top_app(struct task_struct *p)
-{
-	return p && p->inherit_top_app > 0;
-}
-
-inline void set_inherit_top_app(struct task_struct *p, struct task_struct *from)
-{
-	if (!p || !from)
-		return;
-	if (is_critical_task(p) || from->inherit_top_app >= INHERIT_DEPTH)
-		return;
-	p->inherit_top_app = from->inherit_top_app + 1;
-#ifdef CONFIG_PERF_HUMANTASK
-	p->human_task = 1;
-#endif
-}
-
-inline void restore_inherit_top_app(struct task_struct *p)
-{
-	if (p && is_inherit_top_app(p)) {
-		p->inherit_top_app = 0;
-#ifdef CONFIG_PERF_HUMANTASK
-		p->human_task = 0;
-#endif
-	}
-}
-#endif
