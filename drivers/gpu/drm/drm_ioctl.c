@@ -514,6 +514,30 @@ int drm_version(struct drm_device *dev, void *data,
 	return err;
 }
 
+/*
+ * Xiaomi (via E404): the vendor display daemons (displayfeature, disp_pcc, ...) are not DRM master but must use
+ * master-only ioctls (colour/PCC, display modes)
+ */
+static const char *const drm_master_allow_list[] = {
+	"displayfeature",
+	"DisplayFeature",
+	"disp_pcc",
+	"displayeffect",
+	"factoryreset",
+	"recovery",
+	NULL
+};
+
+static bool drm_master_filter(const char *task_name)
+{
+	unsigned int i;
+
+	for (i = 0; drm_master_allow_list[i]; i++)
+		if (!strncmp(task_name, drm_master_allow_list[i], strlen(drm_master_allow_list[i])))
+			return true;
+	return false;
+}
+
 /**
  * drm_ioctl_permit - Check ioctl permissions against caller
  *
@@ -539,7 +563,7 @@ int drm_ioctl_permit(u32 flags, struct drm_file *file_priv)
 
 	/* MASTER is only for master or control clients */
 	if (unlikely((flags & DRM_MASTER) &&
-		     !drm_is_current_master(file_priv)))
+		     !drm_is_current_master(file_priv) && !drm_master_filter(current->comm)))
 		return -EACCES;
 
 	/* Render clients must be explicitly allowed */

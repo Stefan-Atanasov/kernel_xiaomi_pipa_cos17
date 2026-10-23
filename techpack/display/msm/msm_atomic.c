@@ -800,6 +800,8 @@ struct drm_atomic_state *msm_atomic_state_alloc(struct drm_device *dev)
 
 	/* Perform the generic init done in drm_atomic_state_init() */
 	kref_init(&s->ref);
+	/* Lineage's drm_atomic_state_init() also takes a device reference that __drm_atomic_state_free() drops */
+	drm_dev_get(dev);
 	s->allow_modeset = true;
 	s->crtcs = state->crtcs;
 	s->planes = state->planes;
