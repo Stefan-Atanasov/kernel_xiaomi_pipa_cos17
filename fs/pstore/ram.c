@@ -36,6 +36,7 @@
 #include <linux/of.h>
 #include <linux/of_address.h>
 #include <linux/memblock.h>
+#include <linux/sizes.h>
 
 #define RAMOOPS_KERNMSG_HDR "===="
 #define MIN_MEM_SIZE 4096UL
@@ -990,8 +991,10 @@ static int __init ramoops_memreserve(char *p)
 	size = memparse(p, &p) & PAGE_MASK;
 	ramoops_data.mem_size = size;
 	ramoops_data.mem_address = 0xB0000000;
+	/* pipa-cos17: same layout as E404/joeyzhu (1 MB dump, 2 MB console, 1 MB pmsg) so either kernel reads the other's log */
+	ramoops_data.record_size = SZ_1M;
 	ramoops_data.console_size = size / 2;
-	ramoops_data.pmsg_size = size / 2;
+	ramoops_data.pmsg_size = SZ_1M;
 	ramoops_data.dump_oops = 1;
 
 	pr_info("msm_reserve_ramoops_memory addr=%llx,size=%lx\n",
