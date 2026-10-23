@@ -93,4 +93,9 @@ menu "Xiaomi board selection"
 		help
 		  Support for Mi 10
 
+config BOARD_PIPA
+	def_bool MACH_XIAOMI_PIPA
+	help
+	  Name E404's pipa display driver (techpack/display) uses for the same board.
+
 endmenu

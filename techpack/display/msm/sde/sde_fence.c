@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Copyright (c) 2016-2020, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2016-2019, The Linux Foundation. All rights reserved.
  */
 
 #define pr_fmt(fmt)	"[drm:%s:%d] " fmt, __func__, __LINE__
@@ -11,6 +11,8 @@
 #include "sde_fence.h"
 
 #define TIMELINE_VAL_LENGTH		128
+
+static struct kmem_cache *kmem_fence_pool;
 
 void *sde_sync_get(uint64_t fd)
 {
@@ -84,7 +86,6 @@ uint32_t sde_sync_get_name_prefix(void *fence)
 struct sde_fence {
 	struct dma_fence base;
 	struct sde_fence_context *ctx;
-	char name[SDE_FENCE_NAME_SIZE];
 	struct list_head	fence_list;
 	int fd;
 };
@@ -109,16 +110,12 @@ static inline struct sde_fence *to_sde_fence(struct dma_fence *fence)
 
 static const char *sde_fence_get_driver_name(struct dma_fence *fence)
 {
-	struct sde_fence *f = to_sde_fence(fence);
-
-	return f->name;
+	return "sde";
 }
 
 static const char *sde_fence_get_timeline_name(struct dma_fence *fence)
 {
-	struct sde_fence *f = to_sde_fence(fence);
-
-	return f->ctx->name;
+	return "timeline";
 }
 
 static bool sde_fence_enable_signaling(struct dma_fence *fence)
@@ -144,7 +141,7 @@ static void sde_fence_release(struct dma_fence *fence)
 	if (fence) {
 		f = to_sde_fence(fence);
 		kref_put(&f->ctx->kref, sde_fence_destroy);
-		kfree(f);
+		kmem_cache_free(kmem_fence_pool, f);
 	}
 }
 
@@ -192,37 +189,32 @@ static int _sde_fence_create_fd(void *fence_ctx, uint32_t val)
 	signed int fd = -EINVAL;
 	struct sde_fence_context *ctx = fence_ctx;
 
-	if (!ctx) {
+	if (unlikely(!ctx)) {
 		SDE_ERROR("invalid context\n");
 		goto exit;
 	}
 
-	sde_fence = kzalloc(sizeof(*sde_fence), GFP_KERNEL);
-	if (!sde_fence)
+	sde_fence = kmem_cache_zalloc(kmem_fence_pool, GFP_KERNEL);
+	if (unlikely(!sde_fence))
 		return -ENOMEM;
 
 	sde_fence->ctx = fence_ctx;
-	snprintf(sde_fence->name, SDE_FENCE_NAME_SIZE, "sde_fence:%s:%u",
-						sde_fence->ctx->name, val);
 	dma_fence_init(&sde_fence->base, &sde_fence_ops, &ctx->lock,
 		ctx->context, val);
 	kref_get(&ctx->kref);
 
 	/* create fd */
-	fd = get_unused_fd_flags(0);
-	if (fd < 0) {
-		SDE_ERROR("failed to get_unused_fd_flags(), %s\n",
-							sde_fence->name);
+	fd = get_unused_fd_start_flags(1, 0);
+	if (unlikely(fd < 0)) {
 		dma_fence_put(&sde_fence->base);
 		goto exit;
 	}
 
 	/* create fence */
 	sync_file = sync_file_create(&sde_fence->base);
-	if (sync_file == NULL) {
+	if (unlikely(sync_file == NULL)) {
 		put_unused_fd(fd);
 		fd = -EINVAL;
-		SDE_ERROR("couldn't create fence, %s\n", sde_fence->name);
 		dma_fence_put(&sde_fence->base);
 		goto exit;
 	}
@@ -254,7 +246,6 @@ struct sde_fence_context *sde_fence_init(const char *name, uint32_t drm_id)
 		return ERR_PTR(-ENOMEM);
 	}
 
-	strlcpy(ctx->name, name, ARRAY_SIZE(ctx->name));
 	ctx->drm_id = drm_id;
 	kref_init(&ctx->kref);
 	ctx->context = dma_fence_context_alloc(1);
@@ -289,7 +280,8 @@ void sde_fence_prepare(struct sde_fence_context *ctx)
 	}
 }
 
-static void _sde_fence_trigger(struct sde_fence_context *ctx, bool error)
+static void _sde_fence_trigger(struct sde_fence_context *ctx,
+		ktime_t ts, bool error)
 {
 	unsigned long flags;
 	struct sde_fence *fc, *next;
@@ -305,6 +297,10 @@ static void _sde_fence_trigger(struct sde_fence_context *ctx, bool error)
 
 	list_for_each_entry_safe(fc, next, &ctx->fence_list_head, fence_list) {
 		spin_lock_irqsave(&ctx->lock, flags);
+		/*
+		 * Lineage's dma_fence keeps timestamp in a union with cb_list: writing it before
+		 * signalling corrupts the callback list (oops in dma_fence_signal_locked)
+		 */
 		if (error)
 			dma_fence_set_error(&fc->base, -EBUSY);
 		is_signaled = dma_fence_is_signaled_locked(&fc->base);
@@ -327,7 +323,7 @@ int sde_fence_create(struct sde_fence_context *ctx, uint64_t *val,
 	int fd, rc = -EINVAL;
 	unsigned long flags;
 
-	if (!ctx || !val) {
+	if (unlikely(!ctx || !val)) {
 		SDE_ERROR("invalid argument(s), fence %d, pval %d\n",
 				ctx != NULL, val != NULL);
 		return rc;
@@ -397,7 +393,7 @@ void sde_fence_signal(struct sde_fence_context *ctx, ktime_t ts,
 	SDE_EVT32(ctx->drm_id, ctx->done_count, ctx->commit_count,
 			ktime_to_us(ts));
 
-	_sde_fence_trigger(ctx, (fence_event == SDE_FENCE_SIGNAL_ERROR));
+	_sde_fence_trigger(ctx, ts, (fence_event == SDE_FENCE_SIGNAL_ERROR));
 }
 
 void sde_fence_timeline_status(struct sde_fence_context *ctx,
@@ -478,3 +474,11 @@ void sde_debugfs_timeline_dump(struct sde_fence_context *ctx,
 	}
 	spin_unlock(&ctx->list_lock);
 }
+
+static int __init sde_kmem_pool_init(void)
+{
+	kmem_fence_pool = KMEM_CACHE(sde_fence, SLAB_HWCACHE_ALIGN | SLAB_PANIC);
+	return 0;
+}
+
+module_init(sde_kmem_pool_init);

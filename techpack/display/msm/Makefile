@@ -22,6 +22,8 @@ msm_drm-$(CONFIG_DRM_MSM_DP) += dp/dp_usbpd.o \
 	dp/dp_drm.o \
 	dp/dp_hdcp2p2.o \
 	dp/dp_mst_drm.o \
+	sde_hdcp_1x.o \
+	sde_hdcp_2x.o \
 
 msm_drm-$(CONFIG_DRM_MSM_SDE) += sde/sde_crtc.o \
 	sde/sde_encoder.o \
@@ -38,14 +40,13 @@ msm_drm-$(CONFIG_DRM_MSM_SDE) += sde/sde_crtc.o \
 	sde/clone_cooling_device.o \
 	sde/sde_color_processing.o \
 	sde/sde_vbif.o \
+	xiaomi_frame_stat.o \
 	sde_io_util.o \
 	sde/sde_hw_reg_dma_v1_color_proc.o \
 	sde/sde_hw_color_proc_v4.o \
 	sde/sde_hw_ad4.o \
 	sde/sde_hw_uidle.o \
 	sde_edid_parser.o \
-	sde_hdcp_1x.o \
-	sde_hdcp_2x.o \
 	sde/sde_hw_catalog.o \
 	sde/sde_hw_cdm.o \
 	sde/sde_hw_dspp.o \
@@ -69,9 +70,10 @@ msm_drm-$(CONFIG_DRM_MSM_SDE) += sde/sde_crtc.o \
 	sde/sde_hw_ds.o \
 	sde/sde_fence.o \
 	sde/sde_hw_qdss.o \
-	sde_dbg.o \
+	sde/sde_hw_rc.o
+
+msm_drm-$(CONFIG_DEBUG_FS) += sde_dbg.o \
 	sde_dbg_evtlog.o \
-	sde/sde_hw_rc.o \
 
 msm_drm-$(CONFIG_DRM_SDE_WB) += sde/sde_wb.o \
 	sde/sde_encoder_phys_wb.o \
@@ -79,6 +81,8 @@ msm_drm-$(CONFIG_DRM_SDE_WB) += sde/sde_wb.o \
 msm_drm-$(CONFIG_DRM_SDE_RSC) += sde_rsc.o \
 	sde_rsc_hw.o \
 	sde_rsc_hw_v3.o \
+
+msm_drm-$(CONFIG_DRM_SDE_EXPO) += sde/sde_expo_dim_layer.o
 
 msm_drm-$(CONFIG_DRM_MSM_DSI) += dsi/dsi_phy.o \
 	dsi/dsi_pwr.o \
