@@ -1243,9 +1243,26 @@ static int override_release(char __user *release, size_t len)
 SYSCALL_DEFINE1(newuname, struct new_utsname __user *, name)
 {
 	struct new_utsname tmp;
+	uid_t cur_uid = current_uid().val;
 
 	down_read(&uts_sem);
 	memcpy(&tmp, utsname(), sizeof(tmp));
+	/*
+	 * Android 17's prebuilt BPF loaders refuse kernels older than 5.10, and
+	 * the ColorOS framework expects >= 5.10 too. Lineage carries the BPF
+	 * backports they need; report what E404 reports on this ROM.
+	 */
+	if (cur_uid == 0 &&
+	    (!strncmp(current->comm, "bpfloader", 9) ||
+	     !strncmp(current->comm, "netbpfload", 10) ||
+	     !strncmp(current->comm, "uprobestats", 11) ||
+	     !strncmp(current->comm, "netd", 4))) {
+		strlcpy(tmp.release, "5.15.325", sizeof(tmp.release));
+		pr_debug("fake uname: %s/%d release=%s\n",
+			 current->comm, current->pid, tmp.release);
+	} else if (cur_uid >= 1000 || !strcmp(current->comm, "main")) {
+		strlcpy(tmp.release, "5.10.325", sizeof(tmp.release));
+	}
 	up_read(&uts_sem);
 	if (copy_to_user(name, &tmp, sizeof(tmp)))
 		return -EFAULT;
