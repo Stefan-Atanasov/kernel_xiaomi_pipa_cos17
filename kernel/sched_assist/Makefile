@@ -1,5 +1,6 @@
 # project: oplus/kernel/cpu
 obj-y += sched_assist_common.o
+obj-y += sa_ux_task.o
 obj-$(CONFIG_OPLUS_FEATURE_ASYNC_BINDER_INHERIT_UX) += sched_assist_binder.o
 obj-$(CONFIG_OPLUS_FEATURE_ASYNC_BINDER_INHERIT_UX) += binder_sysfs.o
 obj-y += sched_assist_workqueue.o

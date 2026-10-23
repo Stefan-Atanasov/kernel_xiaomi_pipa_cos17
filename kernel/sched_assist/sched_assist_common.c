@@ -2933,6 +2933,9 @@ static int __init oplus_sched_assist_init(void)
 
 #endif
 
+	/* ColorOS 16+ interface (ux_task ioctls), sa_ux_task.c */
+	oplus_ux_task_proc_init();
+
 #if defined(CONFIG_OPLUS_FEATURE_ASYNC_BINDER_INHERIT_UX)
 	oplus_binder_sysfs_init();
 #endif /* defined(CONFIG_OPLUS_FEATURE_ASYNC_BINDER_INHERIT_UX) */
