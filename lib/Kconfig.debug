@@ -473,6 +473,13 @@ config MAGIC_SYSRQ_SERIAL
 	  This option allows you to decide whether you want to enable the
 	  magic SysRq key.
 
+config PIPA_BOOTDBG
+	bool "pipa: boot watchdog that panics into pstore (test builds only)"
+	help
+	  If system_server is not running pipa_bootdbg= seconds after boot,
+	  dump the tasks and panic, so the log survives in pstore.
+	  pipa_bootdbg_force=1 panics anyway. Say N for release builds.
+
 config DEBUG_KERNEL
 	bool "Kernel debugging"
 	help
