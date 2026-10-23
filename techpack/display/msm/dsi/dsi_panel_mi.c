@@ -3137,6 +3137,9 @@ int dsi_panel_lockdowninfo_param_read(struct dsi_panel *panel)
 	if (cmd_sets->cmds) {
 		read_cmd_set.cmds = cmd_sets->cmds;
 		read_cmd_set.count = 1;
+		if (mi_cfg->panel_id == 0x4D38324100420200) {
+			read_cmd_set.count = 2;
+		}
 		read_cmd_set.state = cmd_sets->state;
 		rc = dsi_panel_write_cmd_set(panel, &read_cmd_set);
 		if (rc) {
@@ -3146,13 +3149,16 @@ int dsi_panel_lockdowninfo_param_read(struct dsi_panel *panel)
 		}
 
 		pr_info("[%s]", panel->name);
-		if (strcmp(panel->name,"xiaomi 42 02 0a video mode dual dsi cphy panel") &&
-			strcmp(panel->name,"xiaomi 35 02 0b video mode dual dsi cphy panel")) {
+		if (strcmp(panel->name, "xiaomi 42 02 0a video mode dual dsi cphy panel") &&
+			strcmp(panel->name, "xiaomi 35 02 0b video mode dual dsi cphy panel")) {
 
 			ld_read_config.is_read = 1;
 			ld_read_config.cmds_rlen = 8;
 			ld_read_config.read_cmd = read_cmd_set;
 			ld_read_config.read_cmd.cmds = &read_cmd_set.cmds[1];
+			if (mi_cfg->panel_id == 0x4D38324100420200) {
+				ld_read_config.read_cmd.cmds = &read_cmd_set.cmds[2];
+			}
 			rc = dsi_panel_read_cmd_set(panel, &ld_read_config);
 			if (rc <= 0) {
 				pr_err("[%s] failed to read cmds, rc=%d\n", panel->name, rc);
@@ -3160,19 +3166,19 @@ int dsi_panel_lockdowninfo_param_read(struct dsi_panel *panel)
 				goto done;
 			}
 
-			for(i = 0; i < 8; i++) {
+			for (i = 0; i < 8; i++) {
 				pr_info("0x%x", ld_read_config.rbuf[i]);
 				mi_cfg->lockdowninfo_read.lockdowninfo[i] = ld_read_config.rbuf[i];
 			}
 
-			if (!strcmp(panel->name,"xiaomi 37 02 0b video mode dsc dsi panel")) {
+			if (!strcmp(panel->name, "xiaomi 37 02 0b video mode dsc dsi panel")) {
 				mi_cfg->lockdowninfo_read.lockdowninfo[7] = 0x01;
-				pr_info("plockdowninfo[7] = 0x%d \n",
+				pr_info("plockdowninfo[7] = 0x%x\n",
 					mi_cfg->lockdowninfo_read.lockdowninfo[7]);
 			}
 			mi_cfg->lockdowninfo_read.lockdowninfo_read_done = 1;
 		} else {
-			for(i = 0; i < 8; i++) {
+			for (i = 0; i < 8; i++) {
 				ld_read_config.is_read = 1;
 				ld_read_config.cmds_rlen = 1;
 				ld_read_config.read_cmd = read_cmd_set;
