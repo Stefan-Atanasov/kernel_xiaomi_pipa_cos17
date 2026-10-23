@@ -643,6 +643,24 @@ int generic_handle_irq(unsigned int irq)
 }
 EXPORT_SYMBOL_GPL(generic_handle_irq);
 
+/**
+ * generic_handle_irq_safe - Invoke the handler for a particular irq from any context.
+ * @irq:	The irq number to handle
+ *
+ * Backport from 5.18 (as in E404), used by the pipa display driver's sde_irq.c.
+ */
+int generic_handle_irq_safe(unsigned int irq)
+{
+	unsigned long flags;
+	int ret;
+
+	local_irq_save(flags);
+	ret = generic_handle_irq(irq);
+	local_irq_restore(flags);
+	return ret;
+}
+EXPORT_SYMBOL_GPL(generic_handle_irq_safe);
+
 #ifdef CONFIG_HANDLE_DOMAIN_IRQ
 /**
  * __handle_domain_irq - Invoke the handler for a HW irq belonging to a domain

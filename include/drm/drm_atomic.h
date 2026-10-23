@@ -286,6 +286,8 @@ struct drm_atomic_state {
 	bool allow_modeset : 1;
 	bool legacy_cursor_update : 1;
 	bool async_update : 1;
+	/* connectors[] is embedded in the driver's state (E404/Sultan msm_atomic): copy on growth, never krealloc */
+	bool connectors_preallocated : 1;
 	struct __drm_planes_state *planes;
 	struct __drm_crtcs_state *crtcs;
 	int num_connector;
