@@ -297,8 +297,12 @@ static void _sde_fence_trigger(struct sde_fence_context *ctx,
 
 	list_for_each_entry_safe(fc, next, &ctx->fence_list_head, fence_list) {
 		spin_lock_irqsave(&ctx->lock, flags);
-		fc->base.error = error ? -EBUSY : 0;
-		fc->base.timestamp = ts;
+		/*
+		 * Lineage's dma_fence keeps timestamp in a union with cb_list: writing it before
+		 * signalling corrupts the callback list (oops in dma_fence_signal_locked)
+		 */
+		if (error)
+			dma_fence_set_error(&fc->base, -EBUSY);
 		is_signaled = dma_fence_is_signaled_locked(&fc->base);
 		spin_unlock_irqrestore(&ctx->lock, flags);
 
