@@ -85,11 +85,11 @@ static inline int percpu_down_read_trylock(struct percpu_rw_semaphore *sem)
 	 * bleeding the critical section out.
 	 */
 
-	if (ret)
+	if (ret) {
 		rwsem_acquire_read(&sem->rw_sem.dep_map, 0, 1, _RET_IP_);
-		#ifdef CONFIG_LOCKING_PROTECT
+#ifdef CONFIG_LOCKING_PROTECT
 		record_locking_info(current, jiffies);
-		#endif
+#endif
 	}
 
 	return ret;

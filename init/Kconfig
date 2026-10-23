@@ -1134,9 +1134,14 @@ config SCHED_CORE_CTL
 
 menu "OPLUS scheduler features (ColorOS UI First)"
 	depends on SCHED_WALT
+config OPLUS_SYSTEM_KERNEL_QCOM
+	bool
+	default y
+	help
+	  OPPO's modules pick their Qualcomm (not MediaTek) code paths with this.
+
 source "kernel/sched_assist/Kconfig"
 source "kernel/tuning/Kconfig"
-source "kernel/special_opt/Kconfig"
 endmenu
 
 menuconfig NAMESPACES

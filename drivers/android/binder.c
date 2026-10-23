@@ -4405,7 +4405,7 @@ static int binder_wait_for_work(struct binder_thread *thread,
 				 &proc->waiting_threads);
 #endif /* OPLUS_FEATURE_SCHED_ASSIST */
 #ifdef CONFIG_OPLUS_FEATURE_FRAME_BOOST
-		fbg_binder_wait_for_work_hook(NULL, do_proc_work, thread, proc);
+		fbg_binder_wait_for_work_hook(NULL, do_proc_work, thread->task, proc);
 #endif
 		binder_inner_proc_unlock(proc);
 		schedule();
