@@ -151,7 +151,7 @@ static int apply_kernelsu_rules_fn(void *ptr)
 
 void apply_kernelsu_rules(void)
 {
-    struct selinux_policy *pol, *old_pol;
+    struct selinux_policy *pol __maybe_unused, *old_pol __maybe_unused; /* 5.10+ only */
     struct policydb *db;
 
     if (!getenforce()) {
@@ -531,7 +531,7 @@ static int apply_one_sepolicy_cmd(struct policydb *db, const struct sepol_data *
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 10, 0)
 int handle_sepolicy(void __user *user_data, u64 data_len)
 {
-    struct selinux_policy *pol, *old_pol;
+    struct selinux_policy *pol __maybe_unused, *old_pol __maybe_unused; /* 5.10+ only */
     struct policydb *db;
     struct sepol_batch_cursor cursor;
     u8 *payload;
