@@ -1132,6 +1132,13 @@ config SCHED_CORE_CTL
 
 	  If unsure, say N here.
 
+menu "OPLUS scheduler features (ColorOS UI First)"
+	depends on SCHED_WALT
+source "kernel/sched_assist/Kconfig"
+source "kernel/tuning/Kconfig"
+source "kernel/special_opt/Kconfig"
+endmenu
+
 menuconfig NAMESPACES
 	bool "Namespaces support" if EXPERT
 	depends on MULTIUSER

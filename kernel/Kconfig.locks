@@ -255,3 +255,11 @@ config QUEUED_RWLOCKS
 config RWSEM_PRIO_AWARE
        def_bool y
        depends on RWSEM_XCHGADD_ALGORITHM
+
+config LOCKING_PROTECT
+	bool "OPLUS locking protect"
+	depends on OPLUS_FEATURE_SCHED_ASSIST
+	default n
+	help
+	  Tasks holding a mutex/rwsem get picked first for a short time so
+	  UX tasks waiting on them are not delayed (OPPO sched_assist).

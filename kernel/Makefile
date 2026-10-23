@@ -126,6 +126,10 @@ obj-$(CONFIG_HAS_IOMEM) += iomem.o
 obj-$(CONFIG_ZONE_DEVICE) += memremap.o
 obj-$(CONFIG_RSEQ) += rseq.o
 
+# OPLUS sched_assist / frame boost (ColorOS UI First), from OPPO's sm8250 4.19 kernel
+obj-$(CONFIG_OPLUS_FEATURE_SCHED_ASSIST) += sched_assist/ special_opt/
+obj-$(CONFIG_OPLUS_FEATURE_FRAME_BOOST) += tuning/
+
 $(obj)/configs.o: $(obj)/config_data.h
 
 targets += config_data.gz

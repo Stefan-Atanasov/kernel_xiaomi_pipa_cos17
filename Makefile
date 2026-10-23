@@ -1005,6 +1005,14 @@ KBUILD_CFLAGS	+= $(call cc-option,-fmacro-prefix-map=$(srctree)/=)
 # use the deterministic mode of AR if available
 KBUILD_ARFLAGS := $(call ar-option,D)
 
+# OPLUS code tests these plain macros (OPPO sets them globally in OplusKernelEnvConfig.mk)
+ifeq ($(CONFIG_OPLUS_FEATURE_SCHED_ASSIST),y)
+KBUILD_CFLAGS	+= -DOPLUS_FEATURE_SCHED_ASSIST
+endif
+ifeq ($(CONFIG_OPLUS_FEATURE_IM),y)
+KBUILD_CFLAGS	+= -DOPLUS_FEATURE_IM
+endif
+
 include scripts/Makefile.kasan
 include scripts/Makefile.extrawarn
 include scripts/Makefile.ubsan

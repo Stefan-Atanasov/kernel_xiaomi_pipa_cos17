@@ -107,6 +107,15 @@
 
 #define CREATE_TRACE_POINTS
 #include <trace/events/task.h>
+#ifdef OPLUS_FEATURE_SCHED_ASSIST
+#include <linux/sched_assist/sched_assist_fork.h>
+#endif /* OPLUS_FEATURE_SCHED_ASSIST */
+#ifdef CONFIG_OPLUS_FEATURE_IM
+#include <linux/im/im.h>
+#endif
+#if defined(CONFIG_OPLUS_LOCKING_STRATEGY)
+#include <linux/sched_assist/sync/futex.h>
+#endif
 
 /*
  * Minimum number of threads to boot the kernel
@@ -2024,6 +2033,13 @@ static __latent_entropy struct task_struct *copy_process(
 	p->sequential_io_avg	= 0;
 #endif
 
+#ifdef OPLUS_FEATURE_SCHED_ASSIST
+	init_task_ux_info(p);
+#endif /* OPLUS_FEATURE_SCHED_ASSIST */
+#if defined(CONFIG_OPLUS_LOCKING_STRATEGY)
+	init_task_lkinfo(p);
+#endif
+
 	/* Perform scheduler related setup. Assign this task to a CPU. */
 	retval = sched_fork(clone_flags, p);
 	if (retval)
@@ -2270,6 +2286,11 @@ static __latent_entropy struct task_struct *copy_process(
 	uprobe_copy_process(p, clone_flags);
 
 	copy_oom_score_adj(clone_flags, p);
+	if (!IS_ERR(p)) {
+#ifdef CONFIG_OPLUS_FEATURE_IM
+		im_tsk_init_flag((void *) p);
+#endif
+	}
 
 	return p;
 

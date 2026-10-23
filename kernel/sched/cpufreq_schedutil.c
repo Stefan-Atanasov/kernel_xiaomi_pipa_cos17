@@ -16,6 +16,9 @@
 #include <linux/sched/cpufreq.h>
 #include <trace/events/power.h>
 #include <linux/sched/sysctl.h>
+#ifdef CONFIG_OPLUS_FEATURE_FRAME_BOOST
+#include "../tuning/frame_group.h"
+#endif
 
 struct sugov_tunables {
 	struct gov_attr_set	attr_set;
@@ -59,6 +62,9 @@ struct sugov_policy {
 
 	bool			limits_changed;
 	bool			need_freq_update;
+#ifdef CONFIG_OPLUS_FEATURE_FRAME_BOOST
+	unsigned int flags;
+#endif
 };
 
 struct sugov_cpu {
@@ -136,6 +142,10 @@ static bool sugov_should_update_freq(struct sugov_policy *sg_policy, u64 time)
 	 * to the separate rate limits.
 	 */
 
+#ifdef CONFIG_OPLUS_FEATURE_FRAME_BOOST
+	if (sg_policy->flags & SCHED_CPUFREQ_DEF_FRAMEBOOST)
+		return true;
+#endif
 	delta_ns = time - sg_policy->last_freq_update_time;
 	return delta_ns >= sg_policy->min_rate_limit_ns;
 }
@@ -164,6 +174,11 @@ static bool sugov_up_down_rate_limit(struct sugov_policy *sg_policy, u64 time,
 	s64 delta_ns;
 
 	delta_ns = time - sg_policy->last_freq_update_time;
+
+#ifdef CONFIG_OPLUS_FEATURE_FRAME_BOOST
+	if (sg_policy->flags & SCHED_CPUFREQ_DEF_FRAMEBOOST)
+		return false;
+#endif
 
 	if (next_freq > sg_policy->next_freq &&
 	    delta_ns < sg_policy->up_rate_delay_ns)
@@ -670,6 +685,11 @@ static void sugov_update_single(struct update_util_data *hook, u64 time,
 	unsigned long util, max, hs_util, boost_util;
 	unsigned int next_f;
 	bool busy;
+#ifdef CONFIG_OPLUS_FEATURE_FRAME_BOOST
+	struct cpufreq_policy *policy = sg_policy->policy;
+	unsigned long irq_flags;
+	sg_policy->flags = flags;
+#endif
 
 	if (!sg_policy->tunables->pl && flags & SCHED_CPUFREQ_PL)
 		return;
@@ -686,6 +706,9 @@ static void sugov_update_single(struct update_util_data *hook, u64 time,
 	busy = use_pelt() && !sg_policy->need_freq_update &&
 		sugov_cpu_is_busy(sg_cpu);
 
+#ifdef CONFIG_OPLUS_FEATURE_FRAME_BOOST
+	raw_spin_lock_irqsave(&sg_policy->update_lock, irq_flags);
+#endif
 	sg_cpu->util = util = sugov_get_util(sg_cpu);
 	max = sg_cpu->max;
 	sg_cpu->flags = flags;
@@ -711,6 +734,11 @@ static void sugov_update_single(struct update_util_data *hook, u64 time,
 				sg_cpu->walt_load.rtgb_active, flags);
 
 	sugov_walt_adjust(sg_cpu, &util, &max);
+#ifdef CONFIG_OPLUS_FEATURE_FRAME_BOOST
+	fbg_freq_policy_util(sg_policy->flags, policy->cpus, &util);
+	raw_spin_unlock_irqrestore(&sg_policy->update_lock, irq_flags);
+#endif
+
 	next_f = get_next_freq(sg_policy, util, max);
 	/*
 	 * Do not reduce the frequency if the CPU has not been idle
@@ -782,6 +810,9 @@ static unsigned int sugov_next_freq_shared(struct sugov_cpu *sg_cpu, u64 time)
 
 		sugov_walt_adjust(j_sg_cpu, &util, &max);
 	}
+#ifdef CONFIG_OPLUS_FEATURE_FRAME_BOOST
+	fbg_freq_policy_util(sg_policy->flags, policy->cpus, &util);
+#endif
 
 	return get_next_freq(sg_policy, util, max);
 }
@@ -793,13 +824,23 @@ sugov_update_shared(struct update_util_data *hook, u64 time, unsigned int flags)
 	struct sugov_policy *sg_policy = sg_cpu->sg_policy;
 	unsigned long hs_util, boost_util;
 	unsigned int next_f;
+#ifdef CONFIG_OPLUS_FEATURE_FRAME_BOOST
+	unsigned long irq_flags;
+#endif
 
 	if (!sg_policy->tunables->pl && flags & SCHED_CPUFREQ_PL)
 		return;
 
+#ifdef CONFIG_OPLUS_FEATURE_FRAME_BOOST
+	raw_spin_lock_irqsave(&sg_policy->update_lock, irq_flags);
+	sg_cpu->util = sugov_get_util(sg_cpu);
+	sg_cpu->flags = flags;
+	sg_policy->flags = flags;
+#else
 	sg_cpu->util = sugov_get_util(sg_cpu);
 	sg_cpu->flags = flags;
 	raw_spin_lock(&sg_policy->update_lock);
+#endif
 
 	if (sg_policy->max != sg_cpu->max) {
 		sg_policy->max = sg_cpu->max;
@@ -834,7 +875,11 @@ sugov_update_shared(struct update_util_data *hook, u64 time, unsigned int flags)
 			sugov_deferred_update(sg_policy, time, next_f);
 	}
 
+#ifdef CONFIG_OPLUS_FEATURE_FRAME_BOOST
+	raw_spin_unlock_irqrestore(&sg_policy->update_lock, irq_flags);
+#else
 	raw_spin_unlock(&sg_policy->update_lock);
+#endif
 }
 
 static void sugov_work(struct kthread_work *work)
@@ -1351,6 +1396,9 @@ static int sugov_start(struct cpufreq_policy *policy)
 	sg_policy->limits_changed		= false;
 	sg_policy->need_freq_update		= false;
 	sg_policy->cached_raw_freq		= 0;
+#ifdef CONFIG_OPLUS_FEATURE_FRAME_BOOST
+	sg_policy->flags	= 0;
+#endif
 	sg_policy->prev_cached_raw_freq		= 0;
 
 	for_each_cpu(cpu, policy->cpus) {
@@ -1372,6 +1420,9 @@ static int sugov_start(struct cpufreq_policy *policy)
 							sugov_update_shared :
 							sugov_update_single);
 	}
+#ifdef CONFIG_OPLUS_FEATURE_FRAME_BOOST
+	fbg_add_update_freq_hook(cpufreq_update_util);
+#endif
 	return 0;
 }
 

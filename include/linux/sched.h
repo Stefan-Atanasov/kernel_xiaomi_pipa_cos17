@@ -32,6 +32,10 @@
 #include <linux/rseq.h>
 #include <linux/android_kabi.h>
 
+#ifdef CONFIG_OPLUS_FEATURE_AUDIO_OPT
+#include <linux/sched_assist/sched_assist_status.h>
+#endif
+
 /* task_struct member predeclarations (sorted alphabetically): */
 struct audit_context;
 struct backing_dev_info;
@@ -227,6 +231,25 @@ enum fps {
 
 #endif
 
+#ifdef OPLUS_FEATURE_SCHED_ASSIST
+extern int sysctl_sched_assist_enabled;
+extern int sysctl_sched_assist_scene;
+#endif /* OPLUS_FEATURE_SCHED_ASSIST */
+#ifdef OPLUS_FEATURE_SCHED_ASSIST
+extern int sysctl_cpu_multi_thread;
+#endif
+#ifdef OPLUS_FEATURE_SCHED_ASSIST
+extern int sysctl_slide_boost_enabled;
+#ifdef CONFIG_OPLUS_FEATURE_FRAME_BOOST
+extern int sysctl_input_boost_enabled;
+#endif
+extern int sysctl_boost_task_threshold;
+#endif /* OPLUS_FEATURE_SCHED_ASSIST */
+#ifdef OPLUS_FEATURE_SCHED_ASSIST
+extern int sysctl_prefer_silver;
+extern int sysctl_heavy_task_thresh;
+extern int sysctl_cpu_util_thresh;
+#endif /* OPLUS_FEATURE_SCHED_ASSIST */
 /* Task command name length: */
 #define TASK_COMM_LEN			16
 
@@ -821,6 +844,27 @@ struct wake_q_node {
 	struct wake_q_node *next;
 };
 
+#if defined(CONFIG_OPLUS_LOCKING_STRATEGY)
+struct locking_info {
+	u64 waittime_stamp;
+	/*
+	 * mutex or rwsem optimistic spin start time. Because a task
+	 * can't spin both on mutex and rwsem at one time, use one common
+	 * threshold time is OK.
+	 */
+	u64 opt_spin_start_time;
+	struct task_struct *holder;
+	bool ux_contrib;
+	/*
+	 * Whether task is ux when it's going to be added to mutex or
+	 * rwsem waiter list. It helps us check whether there is ux
+	 * task on mutex or rwsem waiter list. Also, a task can't be
+	 * added to both mutex and rwsem at one time, so use one common
+	 * field is OK.
+	 */
+	bool is_block_ux;
+};
+#endif
 struct task_struct {
 #ifdef CONFIG_THREAD_INFO_IN_TASK
 	/*
@@ -1194,6 +1238,10 @@ struct task_struct {
 	/* Mutex deadlock detection: */
 	struct mutex_waiter		*blocked_on;
 #endif
+#ifdef CONFIG_LOCKING_PROTECT
+	unsigned long locking_time_start;
+	unsigned long locking_depth;
+#endif
 
 #ifdef CONFIG_TRACE_IRQFLAGS
 	unsigned int			irq_events;
@@ -1502,6 +1550,45 @@ struct task_struct {
 #ifdef CONFIG_SECURITY
 	/* Used by LSM modules for access restriction: */
 	void				*security;
+#endif
+#ifdef OPLUS_FEATURE_SCHED_ASSIST
+	int ux_state;
+	atomic64_t inherit_ux;
+	struct list_head ux_entry;
+	int ux_depth;
+	u64 enqueue_time;
+	u64 inherit_ux_start;
+	u64 sum_exec_baseline;
+	u64 total_exec;
+#ifdef CONFIG_OPLUS_UX_IM_FLAG
+	int ux_im_flag;
+#endif
+#endif /* OPLUS_FEATURE_SCHED_ASSIST */
+#ifdef OPLUS_FEATURE_SCHED_ASSIST
+//#ifdef CONFIG_UXCHAIN_V2
+	int ux_once;
+	u64 get_mmlock_ts;
+	int get_mmlock;
+#endif
+#ifdef CONFIG_OPLUS_FEATURE_AUDIO_OPT
+	struct task_info oplus_task_info;
+#endif
+#ifdef CONFIG_LOCKING_PROTECT
+	struct list_head locking_entry;
+#endif
+#if defined(CONFIG_OPLUS_LOCKING_STRATEGY)
+	struct locking_info lkinfo;
+#endif
+
+#ifdef CONFIG_OPLUS_FEATURE_IM
+	int im_flag;
+#endif
+#ifdef CONFIG_OPLUS_FEATURE_FRAME_BOOST
+	struct list_head fbg_list;
+	unsigned int fbg_state;
+	int fbg_depth;
+	bool fbg_running; /* task belongs to a group, and in running */
+	int preferred_cluster_id;
 #endif
 	/* task is frozen/stopped (used by the cgroup freezer) */
 	ANDROID_KABI_USE(1, unsigned frozen:1);

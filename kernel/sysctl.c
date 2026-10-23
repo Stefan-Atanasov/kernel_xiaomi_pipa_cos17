@@ -124,6 +124,12 @@ extern int sysctl_nr_trim_pages;
 static int sixty = 60;
 #endif
 
+#ifdef OPLUS_FEATURE_SCHED_ASSIST
+//#ifdef CONFIG_UXCHAIN_V2
+int sysctl_uxchain_v2 = 1;
+u64 sysctl_mmapsem_uninterruptable_time;
+#endif
+
 static int __maybe_unused neg_one = -1;
 static int __maybe_unused neg_three = -3;
 
@@ -366,6 +372,108 @@ static int min_sched_tunable_scaling = SCHED_TUNABLESCALING_NONE;
 static int max_sched_tunable_scaling = SCHED_TUNABLESCALING_END-1;
 #endif /* CONFIG_SMP */
 #endif /* CONFIG_SCHED_DEBUG */
+
+#ifdef OPLUS_FEATURE_SCHED_ASSIST
+int sysctl_sched_assist_enabled = 1;
+int sysctl_sched_assist_scene = 0;
+int sysctl_prefer_silver = 0;
+int sysctl_heavy_task_thresh = 50;
+int sysctl_cpu_util_thresh = 85;
+#endif /* OPLUS_FEATURE_SCHED_ASSIST */
+#ifdef OPLUS_FEATURE_SCHED_ASSIST
+int sysctl_cpu_multi_thread = 0;
+#endif
+#ifdef OPLUS_FEATURE_SCHED_ASSIST
+#ifdef CONFIG_OPLUS_FEATURE_FRAME_BOOST
+extern unsigned int sysctl_frame_boost_enable;
+extern unsigned int sysctl_frame_boost_debug;
+extern int sysctl_input_boost_enabled;
+int sysctl_slide_boost_enabled;
+
+#define INPUT_BOOST_DURATION 1500000000
+static struct hrtimer ibtimer;
+static int intput_boost_duration;
+static ktime_t ib_last_time;
+
+void enable_input_boost_timer(void)
+{
+	ktime_t ktime;
+
+	ib_last_time = ktime_get();
+	ktime = ktime_set(0, intput_boost_duration);
+
+	hrtimer_start(&ibtimer, ktime, HRTIMER_MODE_REL);
+}
+
+void disable_input_boost_timer(void)
+{
+	hrtimer_cancel(&ibtimer);
+}
+
+enum hrtimer_restart input_boost_timeout(struct hrtimer *timer)
+{
+	ktime_t now, delta;
+
+	now = ktime_get();
+	delta = ktime_sub(now, ib_last_time);
+
+	ib_last_time = now;
+	sysctl_input_boost_enabled = 0;
+
+	return HRTIMER_NORESTART;
+}
+
+static int input_boost_ctrl_handler(struct ctl_table *table, int write, void __user *buffer,
+	size_t *lenp, loff_t *ppos)
+{
+	int result;
+
+	result = proc_dointvec(table, write, buffer, lenp, ppos);
+
+	if (!write)
+		goto out;
+
+	disable_input_boost_timer();
+	enable_input_boost_timer();
+out:
+	return result;
+}
+
+static int slide_boost_ctrl_handler(struct ctl_table *table, int write, void __user *buffer,
+	size_t *lenp, loff_t *ppos)
+{
+	int result;
+
+	result = proc_dointvec(table, write, buffer, lenp, ppos);
+
+	if (!write)
+		goto out;
+
+	if (sysctl_input_boost_enabled && sysctl_slide_boost_enabled) {
+		disable_input_boost_timer();
+		sysctl_input_boost_enabled = 0;
+	}
+
+out:
+	return result;
+}
+#else
+int sysctl_slide_boost_enabled = 0;
+#endif
+int sysctl_boost_task_threshold = 51;
+int sysctl_frame_rate = 60;
+int sched_frame_rate_handler(struct ctl_table *table, int write, void __user *buffer, size_t *lenp, loff_t *ppos)
+{
+	int ret;
+
+	if (write && *ppos)
+		*ppos = 0;
+
+	ret = proc_dointvec(table, write, buffer, lenp, ppos);
+
+	return ret;
+}
+#endif /* OPLUS_FEATURE_SCHED_ASSIST */
 
 #ifdef CONFIG_COMPACTION
 static int min_extfrag_threshold;
@@ -1674,6 +1782,124 @@ static struct ctl_table kern_table[] = {
 		.proc_handler	= proc_dointvec,
 	},
 #endif
+#ifdef OPLUS_FEATURE_SCHED_ASSIST
+	{
+		.procname	= "sched_assist_enabled",
+		.data		= &sysctl_sched_assist_enabled,
+		.maxlen		= sizeof(int),
+		.mode		= 0666,
+		.proc_handler	= proc_dointvec,
+	},
+	{
+		.procname	= "sched_assist_scene",
+		.data		= &sysctl_sched_assist_scene,
+		.maxlen		= sizeof(int),
+		.mode		= 0666,
+		.proc_handler = sysctl_sched_assist_scene_handler,
+	},
+	{
+		.procname	= "prefer_silver_enabled",
+		.data		= &sysctl_prefer_silver,
+		.maxlen		= sizeof(int),
+		.mode		= 0666,
+		.proc_handler = proc_dointvec,
+	},
+	{
+		.procname	= "heavy_task_thresh",
+		.data		= &sysctl_heavy_task_thresh,
+		.maxlen		= sizeof(int),
+		.mode		= 0666,
+		.proc_handler = proc_dointvec,
+	},
+	{
+		.procname	= "cpu_util_thresh",
+		.data		= &sysctl_cpu_util_thresh,
+		.maxlen		= sizeof(int),
+		.mode		= 0666,
+		.proc_handler = proc_dointvec,
+	},
+#endif /* OPLUS_FEATURE_SCHED_ASSIST */
+#ifdef OPLUS_FEATURE_SCHED_ASSIST
+	{
+		.procname	= "cpu_multi_thread",
+		.data		= &sysctl_cpu_multi_thread,
+		.maxlen 	= sizeof(int),
+		.mode		= 0666,
+		.proc_handler = proc_dointvec,
+	},
+#endif /* OPLUS_FEATURE_SCHED_ASSIST */
+#ifdef OPLUS_FEATURE_SCHED_ASSIST
+#ifdef CONFIG_OPLUS_FEATURE_FRAME_BOOST
+	{
+		.procname	= "frame_boost_enabled",
+		.data		= &sysctl_frame_boost_enable,
+		.maxlen 	= sizeof(unsigned int),
+		.mode		= 0666,
+		.proc_handler   = proc_dointvec,
+	},
+	{
+		.procname	= "frame_boost_debug",
+		.data		= &sysctl_frame_boost_debug,
+		.maxlen 	= sizeof(unsigned int),
+		.mode		= 0666,
+		.proc_handler   = proc_dointvec,
+	},
+	{
+		.procname	= "slide_boost_enabled",
+		.data		= &sysctl_slide_boost_enabled,
+		.maxlen 	= sizeof(int),
+		.mode		= 0666,
+		.proc_handler   = slide_boost_ctrl_handler,
+	},
+	{
+		.procname       = "input_boost_enabled",
+		.data           = &sysctl_input_boost_enabled,
+		.maxlen         = sizeof(int),
+		.mode           = 0666,
+		.proc_handler = input_boost_ctrl_handler,
+	},
+#else
+	{
+		.procname	= "slide_boost_enabled",
+		.data		= &sysctl_slide_boost_enabled,
+		.maxlen 	= sizeof(int),
+		.mode		= 0666,
+		.proc_handler   = proc_dointvec,
+	},
+#endif
+	{
+		.procname	= "boost_task_threshold",
+		.data		= &sysctl_boost_task_threshold,
+		.maxlen 	= sizeof(int),
+		.mode		= 0666,
+		.proc_handler = proc_dointvec,
+	},
+	{
+		.procname	= "frame_rate",
+		.data		= &sysctl_frame_rate,
+		.maxlen 	= sizeof(int),
+		.mode		= 0666,
+		.proc_handler = sched_frame_rate_handler,
+	},
+#endif /* OPLUS_FEATURE_SCHED_ASSIST */
+#ifdef OPLUS_FEATURE_SCHED_ASSIST
+//#ifdef CONFIG_UXCHAIN_V2
+	{
+		.procname	= "uxchain_v2",
+		.data		= &sysctl_uxchain_v2,
+		.maxlen = sizeof(int),
+		.mode		= 0666,
+		.proc_handler = proc_dointvec,
+	},
+	{
+		.procname	= "mmapsem_uninterruptable_time",
+		.data		= &sysctl_mmapsem_uninterruptable_time,
+		.maxlen = sizeof(u64),
+		.mode		= 0666,
+		.proc_handler = proc_dointvec,
+	},
+#endif
+
 	{ }
 };
 

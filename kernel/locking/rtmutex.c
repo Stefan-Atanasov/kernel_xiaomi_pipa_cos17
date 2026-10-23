@@ -18,6 +18,9 @@
 #include <linux/sched/wake_q.h>
 #include <linux/sched/debug.h>
 #include <linux/timer.h>
+#ifdef CONFIG_LOCKING_PROTECT
+#include <linux/sched_assist/sched_assist_locking.h>
+#endif
 
 #include "rtmutex_common.h"
 
@@ -1175,6 +1178,9 @@ __rt_mutex_slowlock(struct rt_mutex *lock, int state,
 {
 	int ret = 0;
 
+#ifdef CONFIG_LOCKING_PROTECT
+	update_locking_time(jiffies, false);
+#endif
 	for (;;) {
 		/* Try to acquire the lock: */
 		if (try_to_take_rt_mutex(lock, current, waiter))
@@ -1477,6 +1483,9 @@ static inline void __rt_mutex_lock(struct rt_mutex *lock, unsigned int subclass)
 
 	mutex_acquire(&lock->dep_map, subclass, 0, _RET_IP_);
 	rt_mutex_fastlock(lock, TASK_UNINTERRUPTIBLE, rt_mutex_slowlock);
+#ifdef CONFIG_LOCKING_PROTECT
+	record_locking_info(current, jiffies);
+#endif
 }
 
 #ifdef CONFIG_DEBUG_LOCK_ALLOC
@@ -1525,6 +1534,10 @@ int __sched rt_mutex_lock_interruptible(struct rt_mutex *lock)
 	ret = rt_mutex_fastlock(lock, TASK_INTERRUPTIBLE, rt_mutex_slowlock);
 	if (ret)
 		mutex_release(&lock->dep_map, _RET_IP_);
+#ifdef CONFIG_LOCKING_PROTECT
+	else
+		record_locking_info(current, jiffies);
+#endif
 
 	return ret;
 }
@@ -1569,6 +1582,10 @@ rt_mutex_timed_lock(struct rt_mutex *lock, struct hrtimer_sleeper *timeout)
 				       rt_mutex_slowlock);
 	if (ret)
 		mutex_release(&lock->dep_map, _RET_IP_);
+#ifdef CONFIG_LOCKING_PROTECT
+	else
+		record_locking_info(current, jiffies);
+#endif
 
 	return ret;
 }
@@ -1595,6 +1612,10 @@ int __sched rt_mutex_trylock(struct rt_mutex *lock)
 	ret = rt_mutex_fasttrylock(lock, rt_mutex_slowtrylock);
 	if (ret)
 		mutex_acquire(&lock->dep_map, 0, 1, _RET_IP_);
+#ifdef CONFIG_LOCKING_PROTECT
+	else
+		record_locking_info(current, jiffies);
+#endif
 
 	return ret;
 }
@@ -1609,6 +1630,9 @@ void __sched rt_mutex_unlock(struct rt_mutex *lock)
 {
 	mutex_release(&lock->dep_map, _RET_IP_);
 	rt_mutex_fastunlock(lock, rt_mutex_slowunlock);
+#ifdef CONFIG_LOCKING_PROTECT
+	record_locking_info(current, 0);
+#endif
 }
 EXPORT_SYMBOL_GPL(rt_mutex_unlock);
 
