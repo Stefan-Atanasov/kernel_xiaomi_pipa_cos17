@@ -49,7 +49,7 @@
 #include <linux/platform_data/spi-mt65xx.h>
 #endif
 
-#define NVT_DEBUG 1
+#define NVT_DEBUG 0
 
 //---GPIO number---
 #define NVTTOUCH_RST_PIN 980
@@ -102,7 +102,7 @@ extern const uint16_t touch_key_array[TOUCH_KEY_NUM];
 //---Customerized func.---
 #define NVT_TOUCH_PROC 1
 #define NVT_TOUCH_EXT_PROC 1
-#define NVT_TOUCH_MP 1
+#define NVT_TOUCH_MP 0
 #define NVT_SAVE_TEST_DATA_IN_FILE 0
 #define MT_PROTOCOL_B 1
 #define WAKEUP_GESTURE 1
@@ -163,10 +163,6 @@ struct nvt_ts_data {
 	struct input_dev *input_dev;
 	struct delayed_work nvt_fwu_work;
 	struct delayed_work nvt_lockdown_work;
-	struct mutex power_supply_lock;
-	struct work_struct power_supply_work;
-	struct notifier_block power_supply_notifier;
-	int is_usb_exist;
 	int db_wakeup;
 #if defined(NVT_PEN_CONNECT_STRATEGY)
 	struct work_struct pen_charge_state_change_work;
@@ -175,8 +171,6 @@ struct nvt_ts_data {
 	bool pen_charge_connect;
 	bool game_mode_enable;
 	struct device *dev;
-	int pen_count;
-	bool pen_shield_flag;
 #endif
 	struct mutex pen_switch_lock;
 	int ic_state;
