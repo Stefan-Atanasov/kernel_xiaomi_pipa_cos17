@@ -259,7 +259,8 @@ struct sde_crtc_misr_info {
  * @frame_pending : Whether or not an update is pending
  * @frame_events  : static allocation of in-flight frame events
  * @frame_event_list : available frame event list
- * @spin_lock     : spin lock for frame event, transaction status, etc...
+ * @spin_lock     : spin lock for transaction status, etc...
+ * @fevent_spin_lock     : spin lock for frame event
  * @event_thread  : Pointer to event handler thread
  * @event_worker  : Event worker queue
  * @event_cache   : Local cache of event worker structures
@@ -272,7 +273,6 @@ struct sde_crtc_misr_info {
  * @misr_frame_count  : misr frame count provided by client
  * @misr_data     : store misr data before turning off the clocks.
  * @idle_notify_work: delayed worker to notify idle timeout to user space
- * @early_wakeup_work: work to trigger early wakeup
  * @power_event   : registered power event handle
  * @cur_perf      : current performance committed to clock/bandwidth driver
  * @plane_mask_old: keeps track of the planes used in the previous commit
@@ -288,6 +288,7 @@ struct sde_crtc_misr_info {
  * @ltm_lock        : Spinlock to protect ltm buffer_cnt, hist_en and ltm lists
  * @needs_hw_reset  : Initiate a hw ctl reset
  * @comp_ratio      : Compression ratio
+ * @hist_irq_idx    : hist interrupt irq idx
  * @dspp_blob_info  : blob containing dspp hw capability information
  */
 struct sde_crtc {
@@ -351,7 +352,7 @@ struct sde_crtc {
 	bool misr_enable_debugfs;
 	u32 misr_frame_count;
 	struct kthread_delayed_work idle_notify_work;
-	struct kthread_work early_wakeup_work;
+	struct kthread_delayed_work idle_notify_work_cmd_mode;
 
 	struct sde_power_event *power_event;
 
@@ -383,6 +384,12 @@ struct sde_crtc {
 
 	struct drm_property_blob *dspp_blob_info;
 };
+
+#ifdef CONFIG_DRM_SDE_EXPO
+enum sde_crtc_dirty_flags {
+	SDE_CRTC_DIRTY_DIM_LAYER_EXPO,
+};
+#endif
 
 #define to_sde_crtc(x) container_of(x, struct sde_crtc, base)
 
@@ -457,6 +464,7 @@ struct sde_crtc_mi_state {
  * @ds_cfg: Destination scaler config
  * @scl3_lut_cfg: QSEED3 lut config
  * @new_perf: new performance state being requested
+ * @mi_state: Mi part of crtc state
  * @secure_session: Indicates the type of secure session
  */
 struct sde_crtc_state {
@@ -491,8 +499,10 @@ struct sde_crtc_state {
     /* Mi crtc state */
 	struct sde_crtc_mi_state mi_state;
 	uint32_t num_dim_layers_bank;
-  
 	int secure_session;
+#ifdef CONFIG_DRM_SDE_EXPO
+	struct sde_hw_dim_layer *exposure_dim_layer;
+#endif
 };
 
 enum sde_crtc_irq_state {

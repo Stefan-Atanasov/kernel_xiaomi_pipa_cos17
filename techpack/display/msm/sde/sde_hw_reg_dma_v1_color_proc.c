@@ -368,11 +368,6 @@ static int reg_dmav1_get_dspp_blk(struct sde_hw_cp_cfg *hw_cfg,
 		return -EINVAL;
 	}
 
-	if (hw_cfg->dspp == NULL) {
-		DRM_ERROR("Invalid sde_hw_dspp structure provided in hw_cfg\n");
-		return -EINVAL;
-	}
-
 	if (blk == NULL) {
 		DRM_ERROR("Invalid payload provided\n");
 		return -EINVAL;
@@ -1278,11 +1273,10 @@ void reg_dmav1_setup_dspp_pccv4(struct sde_hw_dspp *ctx, void *cfg)
 		return;
 	}
 
-	if (hw_cfg->payload_clear) {
+	if (hw_cfg->payload_clear)
 		pcc_cfg = hw_cfg->payload_clear;
-	} else {
+	else
 		pcc_cfg = hw_cfg->payload;
-	}
 
 	dma_ops = sde_reg_dma_get_ops();
 	dma_ops->reset_reg_dma_buf(dspp_buf[PCC][ctx->idx]);
