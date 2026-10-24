@@ -23,6 +23,13 @@ config ANDROID_VSOC
 	  a 'cuttlefish' Android image inside QEmu. The driver interacts with
 	  a QEmu ivshmem device. If built as a module, it will be called vsoc.
 
+config OPLUS_HANS
+	bool "HANS kernel and HANS native communication channel"
+	default n
+	help
+	  OPPO ColorOS app freezer (Hans): key events (signal/network package/binder) of
+	  frozen apps are reported to the HANS native daemon over netlink protocol 29.
+
 source "drivers/staging/android/ion/Kconfig"
 
 endif # if ANDROID

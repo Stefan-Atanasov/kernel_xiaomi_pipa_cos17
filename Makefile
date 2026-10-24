@@ -1012,6 +1012,9 @@ endif
 ifeq ($(CONFIG_OPLUS_FEATURE_IM),y)
 KBUILD_CFLAGS	+= -DOPLUS_FEATURE_IM
 endif
+ifeq ($(CONFIG_OPLUS_HANS),y)
+KBUILD_CFLAGS	+= -DOPLUS_FEATURE_HANS_FREEZE
+endif
 
 include scripts/Makefile.kasan
 include scripts/Makefile.extrawarn
