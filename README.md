@@ -1,6 +1,6 @@
 # Kernel for the ColorOS 17 port on Xiaomi Pad 6 (pipa)
 
-Kernel `walt-r5` (Linux 4.19.325) for the ColorOS 17 port (beta5) on the Xiaomi Pad 6 (`pipa`, SM8250 / SD870).
+Kernel `walt-r6` (Linux 4.19.325) for the ColorOS 17 port (beta5) on the Xiaomi Pad 6 (`pipa`, SM8250 / SD870).
 Branch `oppo` is what the port ships; branch `own` is the same kernel without OPPO's UI First scheduler code.
 
 ## What it is made of
@@ -12,6 +12,7 @@ Branch `oppo` is what the port ships; branch `own` is the same kernel without OP
 | Display (`techpack/display`) + touch | E404R kernel (kvsnr113) |
 | Root | SukiSU-Ultra (builtin, uapi 6, manager 4.2.1-r1) + susfs 2.3.0 |
 | ColorOS "UI First" (sched_assist, frame boost, `/proc/oplus_scheduler`, `/proc/sys/fbg`) | OPPO's open-source sm8250 kernel + modules (`oppo/sm8250_u_14.0.0_oslo`), ColorOS 17 `ux_task` interface ported from sm8450 |
+| ColorOS "Hans" app freezer channel (netlink 29; binder, binder_alloc, signal and network reports; `CONFIG_OPLUS_HANS`) | the same OPPO sm8250 kernel (OPD2101). The `hans` daemon is exempt from the 5.10 uname spoof, so it picks this legacy channel |
 
 Changes of our own (see `git log`): WALT frequency/colocation wired to uclamp; SurfaceFlinger GPU contexts on the top
 kgsl ringbuffer; SurfaceFlinger + RenderEngine kept off the little cores in a sched_assist scene (`is_sf()`);
