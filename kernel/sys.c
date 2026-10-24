@@ -1278,7 +1278,12 @@ SYSCALL_DEFINE1(newuname, struct new_utsname __user *, name)
 		strlcpy(tmp.release, "5.15.325", sizeof(tmp.release));
 		pr_debug("fake uname: %s/%d release=%s\n",
 			 current->comm, current->pid, tmp.release);
-	} else if (cur_uid >= 1000 || !strcmp(current->comm, "main")) {
+	} else if ((cur_uid >= 1000 || !strcmp(current->comm, "main")) &&
+		   strcmp(current->group_leader->comm, "hans")) {
+		/*
+		 * Not for OPPO's hans daemon: on >= 5.10 it talks generic netlink
+		 * ("oplus_hans"); our 4.19 Hans channel is the legacy netlink 29.
+		 */
 		strlcpy(tmp.release, "5.10.325", sizeof(tmp.release));
 	}
 	up_read(&uts_sem);
