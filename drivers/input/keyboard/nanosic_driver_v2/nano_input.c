@@ -31,6 +31,20 @@ static struct hid_device * gVirtualKeyboardDev;
 static struct hid_device * gVirtualTouchDev;
 static struct hid_device * gVirtualMouseDev;
 
+/*
+ * pipa: the devices exist only while the keypad is attached. Registered at probe, the
+ * "Xiaomi Keyboard" (an alphabetic external keyboard) told Android a hardware keyboard was
+ * always present: physical-keyboard UI and notification, no full on-screen keyboard.
+ * Attach/detach come from the keypad hall status (0xA2, bit 0); any keypad report also
+ * attaches, so typing works even if no status was seen yet.
+ */
+static DEFINE_MUTEX(gInputLock);
+static bool gInputAttached;
+static bool gInputWant;
+static struct work_struct gInputWork;
+static int Nanosic_input_attach(void);
+static void Nanosic_input_detach(void);
+
 /*定义虚拟化的键盘,鼠标,触摸设备*/
 static struct nano_input_create_dev gConsumerDevice =
 {
@@ -80,6 +94,15 @@ int
 Nanosic_input_write(EM_PacketType type ,void *buf, size_t len)
 {
     int ret = -1;
+
+    if(type > EM_PACKET_TOUCH)
+        return 0;
+
+    mutex_lock(&gInputLock);
+    if(!gInputAttached && Nanosic_input_attach() < 0){
+        mutex_unlock(&gInputLock);
+        return 0;
+    }
 	switch(type)
 	{
 		case EM_PACKET_KEYBOARD:
@@ -108,6 +131,7 @@ Nanosic_input_write(EM_PacketType type ,void *buf, size_t len)
 		default:
 			break;
 	}
+    mutex_unlock(&gInputLock);
 
 	return 0;
 }
@@ -291,8 +315,8 @@ err_hid:
  *  @brief register hid virtual device { 注册对应的input 虚拟设备 }
  *
  ** */
-int
-Nanosic_input_register(void)
+static int
+Nanosic_input_attach(void)
 {
 	gVirtualKeyboardDev = Nanosic_input_create(&gKeyboardDevice);
 	if(IS_ERR_OR_NULL(gVirtualKeyboardDev))
@@ -309,7 +333,8 @@ Nanosic_input_register(void)
 	gVirtualConsumerDev = Nanosic_input_create(&gConsumerDevice);
 	if(IS_ERR_OR_NULL(gVirtualConsumerDev))
 		goto _err4;
-	dbgprint(DEBUG_LEVEL,"input create ok\n");
+	gInputAttached = true;
+	dbgprint(ALERT_LEVEL,"keypad attached, input create ok\n");
 
 	return 0;
 _err4:
@@ -319,8 +344,63 @@ _err3:
 _err2:
 	hid_destroy_device(gVirtualKeyboardDev);
 _err1:
+	gVirtualConsumerDev = gVirtualTouchDev = gVirtualMouseDev = gVirtualKeyboardDev = NULL;
 	dbgprint(ERROR_LEVEL,"input create err\n");
 	return -1;
+}
+
+static void
+Nanosic_input_detach(void)
+{
+	if(!gInputAttached)
+		return;
+
+	hid_destroy_device(gVirtualKeyboardDev);
+	hid_destroy_device(gVirtualMouseDev);
+	hid_destroy_device(gVirtualTouchDev);
+	hid_destroy_device(gVirtualConsumerDev);
+	gVirtualConsumerDev = gVirtualTouchDev = gVirtualMouseDev = gVirtualKeyboardDev = NULL;
+	gInputAttached = false;
+	dbgprint(ALERT_LEVEL,"keypad detached, input release ok\n");
+}
+
+static void
+Nanosic_input_work(struct work_struct *work)
+{
+	mutex_lock(&gInputLock);
+	if(gInputWant && !gInputAttached)
+		Nanosic_input_attach();
+	else
+		Nanosic_input_detach();
+	mutex_unlock(&gInputLock);
+}
+
+/** ************************************************************************//**
+ *  @func Nanosic_input_hall_status
+ *
+ *  @brief keypad hall status from the MCU: create or remove the input devices
+ *
+ ** */
+void
+Nanosic_input_hall_status(bool connected)
+{
+	if(gInputWant == connected)
+		return;
+	gInputWant = connected;
+	schedule_work(&gInputWork);
+}
+
+/** ************************************************************************//**
+ *  @func Nanosic_input_register
+ *
+ *  @brief the devices are created on keypad attach { 键盘接入时才注册input虚拟设备 }
+ *
+ ** */
+int
+Nanosic_input_register(void)
+{
+	INIT_WORK(&gInputWork, Nanosic_input_work);
+	return 0;
 }
 
 /** ************************************************************************//**
@@ -332,19 +412,10 @@ _err1:
 int
 Nanosic_input_release(void)
 {
-	if(!IS_ERR_OR_NULL(gVirtualKeyboardDev))
-		hid_destroy_device(gVirtualKeyboardDev);
-
-	if(!IS_ERR_OR_NULL(gVirtualMouseDev))
-		hid_destroy_device(gVirtualMouseDev);
-
-	if(!IS_ERR_OR_NULL(gVirtualTouchDev))
-		hid_destroy_device(gVirtualTouchDev);
-
-	if(!IS_ERR_OR_NULL(gVirtualConsumerDev))
-		hid_destroy_device(gVirtualConsumerDev);
-
-	dbgprint(DEBUG_LEVEL,"input release ok\n");
+	cancel_work_sync(&gInputWork);
+	mutex_lock(&gInputLock);
+	Nanosic_input_detach();
+	mutex_unlock(&gInputLock);
 
 	return 0;
 }

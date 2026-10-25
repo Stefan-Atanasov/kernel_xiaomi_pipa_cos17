@@ -74,6 +74,7 @@ Nanosic_i2c_specified_packets_detect(char* data)
     }else if(command == 0xA2 && source == FIELD_176X && object == FIELD_HOST){
         data += 4;
         STREAM_TO_UINT8(gHallStatus,data);
+        Nanosic_input_hall_status(gHallStatus & 0x1);
     }
 
     return false;
