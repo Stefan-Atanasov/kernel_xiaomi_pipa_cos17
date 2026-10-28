@@ -321,6 +321,14 @@ config RIONET_RX_SIZE
 	depends on RIONET
 	default "128"
 
+config OPLUS_OVNET
+	tristate "OPPO interconnect virtual netdev (ovnet)"
+	depends on NETFILTER_INGRESS && IPV6
+	help
+	  Link type "ovnet" for ColorOS interconnect network sharing: the pad
+	  uses the phone's mobile data over the Wi-Fi P2P link. Reimplements
+	  OPPO's oplus_network_vnet module.
+
 config TUN
 	tristate "Universal TUN/TAP device driver support"
 	depends on INET
