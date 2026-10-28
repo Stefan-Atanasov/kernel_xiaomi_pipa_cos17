@@ -66,7 +66,12 @@ struct cnss_driver_event {
 	void *data;
 };
 
-static bool disable_nv_mac;
+/*
+ * pipa: no NV MAC ever reaches the firmware (nv_mac only writes persist wlan_mac.bin), so with use-nv-mac
+ * cnss_wait_for_wlfw_mac_ready() polled for 200 x 50 ms and every WLAN start took ~11.5 s longer. HDD takes
+ * the same factory MAC from wlan_mac.bin anyway. Default on; cnss2.disable_nv_mac=0 restores the wait.
+ */
+static bool disable_nv_mac = true;
 module_param(disable_nv_mac, bool, 0444);
 
 static void cnss_set_plat_priv(struct platform_device *plat_dev,
