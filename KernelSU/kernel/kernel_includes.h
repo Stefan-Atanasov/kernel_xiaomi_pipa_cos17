@@ -73,6 +73,10 @@
 #include <linux/vmalloc.h>
 #include <linux/tty.h>
 #include <linux/kref.h>
+#include <linux/jump_label.h>
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 10, 0) /* pipa-cos17: no static_call.h on 4.19; unused here */
+#include <linux/static_call.h>
+#endif
 #include "arch.h"
 #ifdef CONFIG_KSU_SUSFS
 #include <linux/susfs.h>

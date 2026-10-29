@@ -1,4 +1,5 @@
 obj-$(CONFIG_KSU) := ksu.o
+ksu-y := ksu_main.o
 
 ccflags-y += -I$(srctree)/security/selinux -I$(srctree)/security/selinux/include
 ccflags-y += -I$(objtree)/security/selinux -include $(srctree)/include/uapi/asm-generic/errno.h
@@ -18,6 +19,41 @@ ccflags-y += -I$(KSU_KERNEL_DIR) -I$(KSU_KERNEL_DIR)/include
 endif
 
 MDIR    := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
+
+# ===== preinit runner =====
+KSU_UAPI_INC := $(objtree)/usr/include
+ifneq ($(wildcard $(KSU_UAPI_INC)/linux/unistd.h),)
+ksu-y += preinit/preinit.o preinit/blob.o
+
+KSU_RUNNER_CFLAGS := $(CLANG_FLAGS) -std=gnu11 -Os -Wall \
+	-nostdinc -isystem $(shell $(CC) -print-file-name=include) \
+	-I$(KSU_KERNEL_DIR)/preinit/runner/nolibc -I$(KSU_UAPI_INC) \
+	-I$(KSU_KERNEL_DIR)/include \
+	-ffreestanding -fno-stack-protector -fno-pic -fno-pie \
+	-fno-asynchronous-unwind-tables -fno-unwind-tables \
+	-ffunction-sections -fdata-sections
+
+quiet_cmd_ksu_runner = RUNNER  $@
+      cmd_ksu_runner = $(CC) $(KSU_RUNNER_CFLAGS) -c -o $@.o $< && \
+		$(LD) -static -nostdlib -e _start --gc-sections -s -o $@ $@.o && \
+		rm -f $@.o
+
+$(obj)/preinit/runner.elf: $(KSU_KERNEL_DIR)/preinit/runner/runner.c \
+		$(wildcard $(KSU_KERNEL_DIR)/preinit/runner/nolibc/*.h \
+			   $(KSU_KERNEL_DIR)/preinit/runner/nolibc/sys/*.h \
+			   $(KSU_KERNEL_DIR)/include/uapi/*.h) FORCE
+	$(call if_changed,ksu_runner)
+
+targets += preinit/runner.elf
+
+$(obj)/preinit/blob.o: $(obj)/preinit/runner.elf
+asflags-y += -DKSU_PREINIT_RUNNER_BIN=\"$(abspath $(obj)/preinit/runner.elf)\"
+
+else
+$(warning -- KernelSU: $(KSU_UAPI_INC) not found, preinit disabled)
+ccflags-y += -DKSU_NO_PREINIT
+endif
+# ===== end preinit runner =====
 
 REPO_OWNER  := SukiSU-Ultra
 REPO_NAME   := SukiSU-Ultra
@@ -43,12 +79,12 @@ GITHUB_API_BASE  := https://api.github.com/repos/$(REPO_OWNER)/$(REPO_NAME)
 KSU_GITHUB_VER   := $(shell $(CURL_BIN) -s "$(GITHUB_API_BASE)/releases/latest" 2>/dev/null | grep '"tag_name":' | sed -E 's/.*"v?([^"]+)".*/\1/')
 GITHUB_COMMITS   := $(shell $(CURL_BIN) -sI "$(GITHUB_API_BASE)/commits?sha=$(REPO_BRANCH)&per_page=1" 2>/dev/null | grep -i "link:" | sed -n 's/.*page=\([0-9]*\)>; rel="last".*/\1/p')
 LOCAL_COUNT     := $(if $(GITHUB_COMMITS),$(GITHUB_COMMITS),$(git_commit_count))
-# pipa-cos17: pinned (builtin 7f1c299a, merged from main cf41f112, count 3825); no git/API needed
-LOCAL_COUNT     := 3825
-KSU_GITHUB_VER  := 4.2.1
+# pipa-cos17: pinned (SukiSU-Ultra builtin 85d3b048 = v4.3.0 level, main count 3915); no git/API needed
+LOCAL_COUNT     := 3915
+KSU_GITHUB_VER  := 4.3.0
 KSU_VERSION     := $(if $(LOCAL_COUNT),$(shell expr $(VERSION_BASE) + $(LOCAL_COUNT) - $(VERSION_OFFSET)),13000)
 VERSION_TAG     := $(or $(KSU_GITHUB_VER),$(git_latest_tag),4.2.1)
-KSU_VERSION_FULL := v4.2.1-7f1c299a@builtin
+KSU_VERSION_FULL := v4.3.0-85d3b048@builtin
 KSU_VERSION_FULL_UNUSED := $(if $(call git_short_sha),v$(VERSION_TAG)-$(call git_short_sha)@$(call git_branch),v$(VERSION_TAG)-$(REPO_NAME)-unknown@unknown)
 $(info -- $(REPO_NAME) version: $(KSU_VERSION) [$(KSU_VERSION_FULL)])
 
@@ -140,6 +176,16 @@ $(info -- $(REPO_NAME)/compat: modern static_key_interface found)
 ccflags-y += -DKSU_HAS_MODERN_STATIC_KEY_INTERFACE
 endif
 
+# Vendor backports may change these fields independently of LINUX_VERSION_CODE.
+# Inspect the actual target source header, not the host kernel or KMI label.
+ksu_netlink_cfg := $(shell sed -n '/struct netlink_kernel_cfg {/,/^};/p' $(srctree)/include/linux/netlink.h)
+ifneq ($(findstring cb_mutex,$(ksu_netlink_cfg)),)
+ccflags-y += -DKSU_NETLINK_CFG_HAS_CB_MUTEX=1
+endif
+ifneq ($(findstring compare,$(ksu_netlink_cfg)),)
+ccflags-y += -DKSU_NETLINK_CFG_HAS_COMPARE=1
+endif
+
 KSU_PACKAGE_NAME ?= com.sukisu.ultra
 
 ccflags-y += -DKSU_PACKAGE_NAME=\"$(KSU_PACKAGE_NAME)\"
@@ -156,5 +202,6 @@ endif
 
 ccflags-y += -Wno-strict-prototypes -Wno-int-conversion -Wno-gcc-compat -Wno-missing-prototypes
 ccflags-y += -Wno-declaration-after-statement -Wno-unused-function
+
 
 # Keep a new line here!! Because someone may append config
