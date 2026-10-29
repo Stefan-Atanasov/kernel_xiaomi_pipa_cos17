@@ -1,6 +1,8 @@
 # Kernel for the ColorOS 17 port on Xiaomi Pad 6 (pipa)
 
-Kernel `walt-r6` (Linux 4.19.325) for the ColorOS 17 port (beta5) on the Xiaomi Pad 6 (`pipa`, SM8250 / SD870).
+Kernel `walt-r7ov` (Linux 4.19.325) for the ColorOS 17 port on the Xiaomi Pad 6 (`pipa`, SM8250 / SD870). `walt-r6` is
+the beta5 release. r7: keypad input devices only while the keypad is attached (nanosic), no NV MAC wait for Wi-Fi
+(cnss2), `ovnet` virtual netdev for OPPO interconnect network sharing.
 Branch `oppo` is what the port ships; branch `own` is the same kernel without OPPO's UI First scheduler code.
 
 ## What it is made of
