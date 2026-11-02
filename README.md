@@ -1,11 +1,12 @@
 # Kernel for the ColorOS 17 port on Xiaomi Pad 6 (pipa)
 
-Kernel `walt-r9` (Linux 4.19.325) for the ColorOS 17 port on the Xiaomi Pad 6 (`pipa`, SM8250 / SD870). `walt-r6` is
+Kernel `walt-r10` (Linux 4.19.325) for the ColorOS 17 port on the Xiaomi Pad 6 (`pipa`, SM8250 / SD870). `walt-r6` is
 the beta5 release. r7: keypad input devices only while the keypad is attached (nanosic), no NV MAC wait for Wi-Fi
 (cnss2), `ovnet` virtual netdev for OPPO interconnect network sharing. r8: SukiSU-Ultra builtin `85d3b048` (v4.3.0
 level, manager 41100) with 4.19 compat, susfs priority-uid-filter backport. r8kpm: r8 + KPM (KernelPatch 0.14.0,
 patched into the Image after the build, see below). r9: r8kpm + NT36532 touch charger mode (the driver tells the touch
-firmware the USB state: 0x53 plug in, 0x51 out; no touch lag while charging).
+firmware the USB state: 0x53 plug in, 0x51 out; no touch lag while charging). r10: r9 + `/proc/oplus_binder/ux_flag`
+(accepts the ColorOS 16+ binder UX ioctl as a no-op; stops the SchedAssist "fd invalid" log spam).
 Branch `oppo` is what the port ships; branch `own` is the same kernel without OPPO's UI First scheduler code.
 
 ## What it is made of
