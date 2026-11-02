@@ -2574,6 +2574,8 @@ static void nvt_all_para_recovery(void)
 			xiaomi_touch_interfaces.touch_mode[Touch_Resist_RF][GET_DEF_VALUE];
 	}
 
+	ts->is_usb_exist = -1;
+	queue_work(ts->event_wq, &ts->power_supply_work);
 	queue_work(ts->set_touchfeature_wq, &ts->set_touchfeature_work);
 }
 
@@ -2688,6 +2690,43 @@ nvt_pen_charge_state_change_work_out:
 	NVT_LOG("--\n");
 }
 #endif
+
+static int nvt_power_supply_event(struct notifier_block *nb,
+				  unsigned long event, void *ptr)
+{
+	struct nvt_ts_data *ts =
+	    container_of(nb, struct nvt_ts_data, power_supply_notifier);
+
+	if (ts && ts->event_wq != NULL)
+		queue_work(ts->event_wq, &ts->power_supply_work);
+
+	return 0;
+}
+
+static void nvt_power_supply_work(struct work_struct *work)
+{
+	struct nvt_ts_data *ts =
+		container_of(work, struct nvt_ts_data, power_supply_work);
+	int is_usb_exist = 0;
+	uint8_t buf[3] = {0};
+	int32_t ret;
+
+	mutex_lock(&ts->power_supply_lock);
+	if (bTouchIsAwake) {
+		is_usb_exist = !!power_supply_is_system_supplied();
+		if (is_usb_exist != ts->is_usb_exist || ts->is_usb_exist < 0) {
+			ts->is_usb_exist = is_usb_exist;
+			NVT_LOG("USB is %s", is_usb_exist ? "exist" : "not exist");
+			buf[0] = EVENT_MAP_HOST_CMD;
+			buf[1] = is_usb_exist ? 0x53 : 0x51;
+			buf[2] = 0x00;
+			ret = CTP_SPI_WRITE(ts->client, buf, 3);
+			if (ret)
+				NVT_ERR("USB status set failed, ret = %d!", ret);
+		}
+	}
+	mutex_unlock(&ts->power_supply_lock);
+}
 
 static void get_lockdown_info(struct work_struct *work)
 {
@@ -3302,6 +3341,16 @@ static int32_t nvt_ts_probe(struct spi_device *client)
 	}
 
 #endif
+	ts->is_usb_exist = -1;
+	mutex_init(&ts->power_supply_lock);
+	INIT_WORK(&ts->power_supply_work, nvt_power_supply_work);
+	ts->power_supply_notifier.notifier_call = nvt_power_supply_event;
+	ret = power_supply_reg_notifier(&ts->power_supply_notifier);
+	if (ret) {
+		NVT_ERR("register power_supply_notifier failed. ret=%d\n", ret);
+		ts->power_supply_notifier.notifier_call = NULL;
+		ret = 0;
+	}
 
 #if defined(CONFIG_DRM_PANEL)
 	ts->drm_panel_notif.notifier_call = nvt_drm_panel_notifier_callback;
@@ -3518,6 +3567,10 @@ static int32_t nvt_ts_remove(struct spi_device *client)
 	if (pen_charge_state_notifier_unregister_client(&ts->pen_charge_state_notifier))
 		NVT_ERR("Error occurred while unregistering pen status switch state notifier.\n");
 #endif
+	if (ts->power_supply_notifier.notifier_call) {
+		power_supply_unreg_notifier(&ts->power_supply_notifier);
+		ts->power_supply_notifier.notifier_call = NULL;
+	}
 	mutex_destroy(&ts->pen_switch_lock);
 	destroy_workqueue(ts->event_wq);
 	ts->event_wq = NULL;
@@ -3627,6 +3680,10 @@ static void nvt_ts_shutdown(struct spi_device *client)
 	if (pen_charge_state_notifier_unregister_client(&ts->pen_charge_state_notifier))
 		NVT_ERR("Error occurred while unregistering pen status switch state notifier.\n");
 #endif
+	if (ts->power_supply_notifier.notifier_call) {
+		power_supply_unreg_notifier(&ts->power_supply_notifier);
+		ts->power_supply_notifier.notifier_call = NULL;
+	}
 	mutex_destroy(&ts->pen_switch_lock);
 	destroy_workqueue(ts->event_wq);
 	ts->event_wq = NULL;
@@ -3850,6 +3907,9 @@ static int32_t nvt_ts_resume(struct device *dev)
 	bTouchIsAwake = 1;
 
 	mutex_unlock(&ts->lock);
+
+	ts->is_usb_exist = -1;
+	queue_work(ts->event_wq, &ts->power_supply_work);
 
 	dsi_panel_doubleclick_enable(!!ts->db_wakeup);/*if true, dbclick work until next suspend*/
 	if (likely(ts->ic_state == NVT_IC_RESUME_IN)) {

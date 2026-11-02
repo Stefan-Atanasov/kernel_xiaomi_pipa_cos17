@@ -173,6 +173,11 @@ struct nvt_ts_data {
 	struct device *dev;
 #endif
 	struct mutex pen_switch_lock;
+	/* USB/charger state for the firmware noise mode (0x53 in, 0x51 out) */
+	struct mutex power_supply_lock;
+	struct work_struct power_supply_work;
+	struct notifier_block power_supply_notifier;
+	int is_usb_exist;
 	int ic_state;
 	int gesture_command_delayed;
 	bool dev_pm_suspend;
