@@ -3,6 +3,9 @@ obj-y += sched_assist_common.o
 obj-y += sa_ux_task.o
 obj-$(CONFIG_OPLUS_FEATURE_ASYNC_BINDER_INHERIT_UX) += sched_assist_binder.o
 obj-$(CONFIG_OPLUS_FEATURE_ASYNC_BINDER_INHERIT_UX) += binder_sysfs.o
+ifneq ($(CONFIG_OPLUS_FEATURE_ASYNC_BINDER_INHERIT_UX),y)
+obj-y += sa_binder_ux_flag.o
+endif
 obj-y += sched_assist_workqueue.o
 #ifdef CONFIG_OPLUS_FEATURE_CPU_JANKINFO
 obj-y += sa_jankinfo.o
