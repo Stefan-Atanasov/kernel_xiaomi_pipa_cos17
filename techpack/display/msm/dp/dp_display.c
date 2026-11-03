@@ -195,6 +195,18 @@ struct dp_display_private {
 	struct notifier_block usb_nb;
 };
 
+bool pipa_dp_hdcp;
+module_param(pipa_dp_hdcp, bool, 0644);
+MODULE_PARM_DESC(pipa_dp_hdcp, "pipa DP test: 0 = HDCP off on DP, 1 = stock");
+
+unsigned int pipa_dp_max_bpc = 8;
+module_param(pipa_dp_max_bpc, uint, 0644);
+MODULE_PARM_DESC(pipa_dp_max_bpc, "pipa DP test: max bpc on DP, 0 = stock");
+
+bool pipa_dp_log = true;
+module_param(pipa_dp_log, bool, 0644);
+MODULE_PARM_DESC(pipa_dp_log, "pipa DP test: extra DP event logs");
+
 static const struct of_device_id dp_dt_match[] = {
 	{.compatible = "qcom,dp-display"},
 	{}
@@ -307,6 +319,11 @@ static void dp_display_update_hdcp_info(struct dp_display_private *dp)
 	if (dp->debug->hdcp_disabled || dp->debug->sim_mode)
 		return;
 
+	if (!pipa_dp_hdcp) {
+		PIPA_DP_LOG("HDCP not started (pipa_dp_hdcp=0)\n");
+		return;
+	}
+
 	while (i) {
 		dev = &dp->hdcp.dev[i];
 		ops = dev->ops;
@@ -336,6 +353,11 @@ static void dp_display_check_source_hdcp_caps(struct dp_display_private *dp)
 
 	if (dp->debug->hdcp_disabled) {
 		DP_DEBUG("hdcp disabled\n");
+		return;
+	}
+
+	if (!pipa_dp_hdcp) {
+		DP_DEBUG("hdcp off (pipa_dp_hdcp=0)\n");
 		return;
 	}
 
@@ -1141,6 +1163,9 @@ static int dp_display_usbpd_configure_cb(struct device *dev)
 			goto end;
 	}
 
+	PIPA_DP_LOG("usbpd configure: hpd_high=%d orientation=%u\n",
+			dp->hpd->hpd_high, dp->hpd->orientation);
+
 	mutex_lock(&dp->session_lock);
 
 	dp_display_state_remove(DP_STATE_ABORTED);
@@ -1286,6 +1311,8 @@ static int dp_display_usbpd_disconnect_cb(struct device *dev)
 	SDE_EVT32_EXTERNAL(SDE_EVTLOG_FUNC_ENTRY, dp->state,
 			dp->debug->psm_enabled);
 
+	PIPA_DP_LOG("usbpd disconnect: state=0x%x\n", dp->state);
+
 	if (dp->debug->psm_enabled && dp_display_state_is(DP_STATE_READY))
 		dp->link->psm_config(dp->link, &dp->panel->link_info, true);
 
@@ -1361,11 +1388,23 @@ static void dp_display_attention_work(struct work_struct *work)
 
 	if (dp->link->process_request(dp->link)) {
 		mutex_unlock(&dp->session_lock);
+		PIPA_DP_LOG("attention: no link request, CP_IRQ path (hdcp %s)\n",
+			dp_display_is_hdcp_enabled(dp) ? "on" : "off");
 		goto cp_irq;
 	}
 
 	mutex_unlock(&dp->session_lock);
 	SDE_EVT32_EXTERNAL(dp->state, dp->link->sink_request);
+	PIPA_DP_LOG("attention: sink_request=0x%x%s%s%s%s\n",
+		dp->link->sink_request,
+		(dp->link->sink_request & DS_PORT_STATUS_CHANGED) ?
+			" port_status_changed" : "",
+		(dp->link->sink_request & DP_LINK_STATUS_UPDATED) ?
+			" link_status_updated" : "",
+		(dp->link->sink_request & DP_TEST_LINK_TRAINING) ?
+			" test_link_training" : "",
+		(dp->link->sink_request & (DP_TEST_LINK_VIDEO_PATTERN |
+			DP_TEST_LINK_PHY_TEST_PATTERN)) ? " test_pattern" : "");
 
 	if (dp->link->sink_request & DS_PORT_STATUS_CHANGED) {
 		SDE_EVT32_EXTERNAL(dp->state, DS_PORT_STATUS_CHANGED);
@@ -1476,6 +1515,17 @@ static int dp_display_usbpd_attention_cb(struct device *dev)
 	SDE_EVT32_EXTERNAL(dp->state, dp->hpd->hpd_irq, dp->hpd->hpd_high,
 			!!dp_display_state_is(DP_STATE_ENABLED),
 			!!dp_display_state_is(DP_STATE_CONNECTED));
+
+	PIPA_DP_LOG("hpd event: hpd_high=%d hpd_irq=%d enabled=%d connected=%d state=0x%x -> %s\n",
+		dp->hpd->hpd_high, dp->hpd->hpd_irq,
+		!!dp_display_state_is(DP_STATE_ENABLED),
+		!!dp_display_state_is(DP_STATE_CONNECTED), dp->state,
+		!dp->hpd->hpd_high ? "disconnect (HPD low)" :
+		((dp->hpd->hpd_irq && dp_display_state_is(DP_STATE_READY)) ||
+			dp->debug->mst_hpd_sim) ? "attention (IRQ_HPD)" :
+		(dp->process_hpd_connect ||
+			!dp_display_state_is(DP_STATE_CONNECTED)) ?
+			"connect (HPD high)" : "ignored");
 
 	if (!dp->hpd->hpd_high) {
 		dp_display_disconnect_sync(dp);
@@ -1820,6 +1870,13 @@ static int dp_display_set_mode(struct dp_display *dp_display, void *panel,
 
 	mode->timing.bpp = dp->panel->get_mode_bpp(dp->panel,
 			mode->timing.bpp, mode->timing.pixel_clk_khz);
+
+	PIPA_DP_LOG("mode %ux%u@%u pclk=%u kHz bpp=%u (sink bpc %u, max_bpc %u) lanes=%u rate=%u kHz\n",
+		mode->timing.h_active, mode->timing.v_active,
+		mode->timing.refresh_rate, mode->timing.pixel_clk_khz,
+		mode->timing.bpp, dp_panel->connector->display_info.bpc,
+		pipa_dp_max_bpc, dp->link->link_params.lane_count,
+		drm_dp_bw_code_to_link_rate(dp->link->link_params.bw_code));
 
 	dp_panel->pinfo = mode->timing;
 	mutex_unlock(&dp->session_lock);

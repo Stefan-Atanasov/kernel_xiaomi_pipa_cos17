@@ -2205,6 +2205,10 @@ static u32 dp_panel_get_supported_bpp(struct dp_panel *dp_panel,
 		min_supported_bpp = 24;
 
 	bpp = min_t(u32, mode_edid_bpp, max_supported_bpp);
+	/* pipa DP test (bug 54): cap the colour depth, 0 = stock */
+	if (pipa_dp_max_bpc)
+		bpp = min_t(u32, bpp, max_t(u32, pipa_dp_max_bpc * 3,
+					min_supported_bpp));
 
 	link_params = &panel->link->link_params;
 

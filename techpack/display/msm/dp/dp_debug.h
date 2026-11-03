@@ -37,6 +37,26 @@
 	pr_warn("[drm:%s][msm-dp-warn][%-4d]"fmt, __func__,  \
 			current->pid, ##__VA_ARGS__)
 
+/*
+ * pipa DP test switches (bug 54, GO27Q24 HPD drop). Module parameters of
+ * msm_drm, writable at run time in /sys/module/msm_drm/parameters/:
+ *  pipa_dp_hdcp    0 = never start HDCP 1.x/2.2 on DP (test default), 1 = stock
+ *  pipa_dp_max_bpc 8 = at most 8 bpc (24 bpp) on DP (test default), 0 = stock
+ *  pipa_dp_log     1 = extra DP_INFO lines for HPD/IRQ_HPD/attention, link and
+ *                  mode (test default), 0 = off
+ * New values apply at the next connect (hotplug).
+ */
+extern bool pipa_dp_hdcp;
+extern unsigned int pipa_dp_max_bpc;
+extern bool pipa_dp_log;
+
+#define PIPA_DP_LOG(fmt, ...)                                                \
+	do {                                                                 \
+		if (pipa_dp_log)                                             \
+			pr_info("[drm:%s][msm-dp-pipa][%-4d]"fmt, __func__,  \
+				current->pid, ##__VA_ARGS__);                \
+	} while (0)
+
 #define DP_ERR(fmt, ...)                                    \
 	pr_err("[drm:%s][msm-dp-err][%-4d]"fmt, __func__,   \
 		       current->pid, ##__VA_ARGS__)
