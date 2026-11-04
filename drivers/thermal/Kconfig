@@ -520,4 +520,15 @@ config UNIPHIER_THERMAL
 	  Enable this to plug in UniPhier on-chip PVT thermal driver into the
 	  thermal framework. The driver supports CPU thermal zone temperature
 	  reporting and a couple of trip points.
+
+config HORAE_THERMAL_SHELL
+	bool "OPPO horae shell temperature node (/proc/shell-temp)"
+	help
+	  ColorOS' thermal service horae computes the shell (skin) temperature
+	  from the board thermal zones and writes "<index> <millicelsius>" to
+	  /proc/shell-temp (index 0 front, 1 frame, 2 back). Reading the node
+	  gives the highest value; get_current_shell_temp() returns it to other
+	  kernel code. Thermal zones are registered only for "oplus,shell-temp"
+	  device-tree nodes (pipa has none), so the node changes no thermal
+	  mitigation. Port of OPPO's horae_shell_temp driver.
 endif
