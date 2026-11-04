@@ -1,6 +1,6 @@
 # Kernel for the ColorOS 17 port on Xiaomi Pad 6 (pipa)
 
-Kernel `walt-r13` (Linux 4.19.325) for the ColorOS 17 port on the Xiaomi Pad 6 (`pipa`, SM8250 / SD870). `walt-r6` is
+Kernel `walt-r15` (Linux 4.19.325) for the ColorOS 17 port on the Xiaomi Pad 6 (`pipa`, SM8250 / SD870). `walt-r6` is
 the beta5 release. r7: keypad input devices only while the keypad is attached (nanosic), no NV MAC wait for Wi-Fi
 (cnss2), `ovnet` virtual netdev for OPPO interconnect network sharing. r8: SukiSU-Ultra builtin `85d3b048` (v4.3.0
 level, manager 41100) with 4.19 compat, susfs priority-uid-filter backport. r8kpm: r8 + KPM (KernelPatch 0.14.0,
@@ -12,6 +12,8 @@ before, threads kept a literal 70/74 and the system_server leader lost its flag)
 (`/proc/oplus_qos_sched`, ioctl ABI of ColorOS `qos_sched.so`) for the ColorOS QoS scheduler (`ro.oplus.osense.uaf_qos_enable`).
 r13: qos_sched hardening (LUT lifetime per mapping, zeroed pages, locking, system-only nodes) and a no-op
 `cpu.schedtune.boost` cgroup file (the ColorOS group setup writes it last and failed without it).
+r14: DisplayPort (USB-C monitor) at most 8 bpc by default: a GO27Q24 dropped the link (HPD low) at 10 bpc; module parameters `pipa_dp_hdcp`, `pipa_dp_max_bpc`, `pipa_dp_log` in `/sys/module/msm_drm/parameters/`.
+r15: the DP preferred mode is the highest refresh rate at the monitor's preferred resolution that fits the trained link (SurfaceFlinger keeps an external display at its first mode, e.g. 2560x1440@120 instead of @60); `pipa_dp_prefer_max_rate`, off until reboot after two quick HPD drops.
 Branch `oppo` is what the port ships; branch `own` is the same kernel without OPPO's UI First scheduler code.
 
 ## What it is made of
