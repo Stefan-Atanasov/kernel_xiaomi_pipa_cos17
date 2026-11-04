@@ -527,6 +527,51 @@ int dp_connector_atomic_check(struct drm_connector *connector,
 	return 0;
 }
 
+/*
+ * pipa (bug 54): move DRM_MODE_TYPE_PREFERRED to the highest refresh mode at the preferred resolution that the
+ * driver accepts and that fits the trained link (dp_display.c: why, and the fallback).
+ */
+static void dp_drm_pipa_prefer_max_rate(struct drm_connector *connector,
+		struct dp_display *dp, void *panel,
+		const struct msm_resource_caps_info *avail_res)
+{
+	struct drm_display_mode *m, *pref = NULL, *best;
+
+	if (!avail_res || !dp_display_pipa_hr_allowed())
+		return;
+	list_for_each_entry(m, &connector->probed_modes, head) {
+		if (m->type & DRM_MODE_TYPE_PREFERRED) {
+			pref = m;
+			break;
+		}
+	}
+	if (!pref)
+		return;
+	best = pref;
+	list_for_each_entry(m, &connector->probed_modes, head) {
+		if (m == pref || m->hdisplay != pref->hdisplay ||
+				m->vdisplay != pref->vdisplay ||
+				(m->flags & DRM_MODE_FLAG_INTERLACE))
+			continue;
+		if (drm_mode_vrefresh(m) <= drm_mode_vrefresh(best))
+			continue;
+		m->vrefresh = drm_mode_vrefresh(m);
+		if (dp->validate_mode(dp, panel, m, avail_res) != MODE_OK)
+			continue;
+		if (!dp_display_pipa_link_fits(dp, m->clock))
+			continue;
+		best = m;
+	}
+	if (best == pref)
+		return;
+	pref->type &= ~DRM_MODE_TYPE_PREFERRED;
+	best->type |= DRM_MODE_TYPE_PREFERRED;
+	dp_display_pipa_hr_promoted();
+	DP_INFO("pipa: preferred mode %ux%u@%d -> @%d (%d kHz)\n",
+		best->hdisplay, best->vdisplay, drm_mode_vrefresh(pref),
+		drm_mode_vrefresh(best), best->clock);
+}
+
 int dp_connector_get_modes(struct drm_connector *connector,
 		void *display, const struct msm_resource_caps_info *avail_res)
 {
@@ -572,6 +617,8 @@ int dp_connector_get_modes(struct drm_connector *connector,
 			m->height_mm = connector->display_info.height_mm;
 			drm_mode_probed_add(connector, m);
 		}
+		dp_drm_pipa_prefer_max_rate(connector, dp, sde_conn->drv_panel,
+				avail_res);
 	} else {
 		DP_ERR("No sink connected\n");
 	}

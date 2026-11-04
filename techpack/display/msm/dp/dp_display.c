@@ -207,6 +207,63 @@ bool pipa_dp_log;
 module_param(pipa_dp_log, bool, 0644);
 MODULE_PARM_DESC(pipa_dp_log, "pipa: extra DP event logs (default off)");
 
+bool pipa_dp_prefer_max_rate = true;
+module_param(pipa_dp_prefer_max_rate, bool, 0644);
+MODULE_PARM_DESC(pipa_dp_prefer_max_rate, "pipa: preferred mode = highest refresh at the sink's preferred resolution that fits the trained link (default on)");
+
+/*
+ * pipa (bug 54): SurfaceFlinger keeps an external display at the mode that is active at connect (no later mode
+ * change on a follower display), and that mode is the sink's EDID preferred mode (often 60 Hz). dp_drm.c moves the
+ * preferred flag to the highest refresh rate at the same resolution. Safety: two HPD drops in a row, each within
+ * 20 s after a connect with a moved flag, turn it off until reboot (a weak link or cable). One drop is not enough:
+ * some monitors (GO27Q24) drop HPD once a few seconds after every first connect.
+ */
+static unsigned long pipa_dp_hr_time;
+static int pipa_dp_hr_drops;
+static bool pipa_dp_hr_off;
+
+bool dp_display_pipa_hr_allowed(void)
+{
+	return pipa_dp_prefer_max_rate && !pipa_dp_hr_off;
+}
+
+void dp_display_pipa_hr_promoted(void)
+{
+	pipa_dp_hr_time = jiffies | 1;
+}
+
+static void dp_display_pipa_hr_hpd_low(void)
+{
+	if (!pipa_dp_hr_time)
+		return;
+	if (time_before(jiffies, pipa_dp_hr_time + 20 * HZ)) {
+		if (++pipa_dp_hr_drops >= 2 && !pipa_dp_hr_off) {
+			pipa_dp_hr_off = true;
+			DP_WARN("pipa: link dropped twice after high refresh connects: preferred mode as the sink reports it until reboot\n");
+		}
+	} else {
+		pipa_dp_hr_drops = 0;
+	}
+	pipa_dp_hr_time = 0;
+}
+
+bool dp_display_pipa_link_fits(struct dp_display *dp_display, u32 pclk_khz)
+{
+	struct dp_display_private *dp;
+	u64 lanes, rate, bpp;
+
+	if (!dp_display)
+		return false;
+	dp = container_of(dp_display, struct dp_display_private, dp_display);
+	if (!dp->link)
+		return false;
+	lanes = dp->link->link_params.lane_count;
+	rate = drm_dp_bw_code_to_link_rate(dp->link->link_params.bw_code); /* kHz per lane, 8b/10b */
+	bpp = pipa_dp_max_bpc ? 3 * pipa_dp_max_bpc : 30;
+	/* payload: lanes x rate x 8 bit, 3 % margin */
+	return lanes && rate && (u64)pclk_khz * bpp * 100 <= lanes * rate * 8 * 97;
+}
+
 static const struct of_device_id dp_dt_match[] = {
 	{.compatible = "qcom,dp-display"},
 	{}
@@ -1528,6 +1585,7 @@ static int dp_display_usbpd_attention_cb(struct device *dev)
 			"connect (HPD high)" : "ignored");
 
 	if (!dp->hpd->hpd_high) {
+		dp_display_pipa_hr_hpd_low();
 		dp_display_disconnect_sync(dp);
 	} else if ((dp->hpd->hpd_irq && dp_display_state_is(DP_STATE_READY)) ||
 			dp->debug->mst_hpd_sim) {

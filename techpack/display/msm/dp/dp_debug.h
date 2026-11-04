@@ -49,6 +49,11 @@
 extern bool pipa_dp_hdcp;
 extern unsigned int pipa_dp_max_bpc;
 extern bool pipa_dp_log;
+extern bool pipa_dp_prefer_max_rate;
+struct dp_display;
+bool dp_display_pipa_hr_allowed(void);
+void dp_display_pipa_hr_promoted(void);
+bool dp_display_pipa_link_fits(struct dp_display *dp_display, u32 pclk_khz);
 
 #define PIPA_DP_LOG(fmt, ...)                                                \
 	do {                                                                 \
