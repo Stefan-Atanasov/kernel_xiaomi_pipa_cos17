@@ -546,6 +546,9 @@ static int dp_ctrl_link_train(struct dp_ctrl_private *ctrl)
 		goto end;
 	}
 
+	PIPA_DP_LOG("link train: lanes=%u rate=%u kHz\n", link_info.num_lanes,
+		link_info.rate);
+
 	ret = dp_ctrl_link_training_1(ctrl);
 	if (ret) {
 		DP_ERR("link training #1 failed\n");
@@ -563,6 +566,11 @@ static int dp_ctrl_link_train(struct dp_ctrl_private *ctrl)
 
 	/* print success info as this is a result of user initiated action */
 	DP_INFO("link training #2 successful\n");
+	PIPA_DP_LOG("link up: lanes=%u rate=%u kHz (bw_code 0x%x) v_level=%u p_level=%u\n",
+		ctrl->link->link_params.lane_count,
+		drm_dp_bw_code_to_link_rate(ctrl->link->link_params.bw_code),
+		ctrl->link->link_params.bw_code,
+		ctrl->link->phy_params.v_level, ctrl->link->phy_params.p_level);
 
 end:
 	dp_ctrl_state_ctrl(ctrl, 0);
