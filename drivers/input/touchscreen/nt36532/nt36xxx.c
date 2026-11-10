@@ -1215,18 +1215,23 @@ void nvt_ts_pen_gesture_report(uint8_t pen_gesture_id)
 }
 #endif
 
-int switch_pen_input_device(void) {
+/*
+ * Send the pen enable/disable host command. The caller holds ts->lock.
+ * Without ts->lock this SPI command can run in the middle of a firmware
+ * download (WDT/ESD recovery, resume). The IC then has no working firmware
+ * and touch is dead until the next resume (BUGS-TODO 84).
+ */
+static int switch_pen_input_device_locked(void) {
 	uint8_t buf[8] = {0};
 	int32_t ret = 0;
 	int enable = 0;
 
 	NVT_LOG("++\n");
-	if (!bTouchIsAwake || !ts) {
+	if (!bTouchIsAwake) {
 		NVT_LOG("touch suspend, stop switch");
 		return ret;
 	}
 
-	msleep(35);
 	mutex_lock(&ts->pen_switch_lock);
 	enable = ((ts->pen_bluetooth_connect) && !(ts->pen_charge_connect) && !(ts->game_mode_enable));
 	NVT_LOG("pen_bluetooth_connect is %d, pen_charge_connect is %d, game_mode_enable %d, %s pen input device\n",
@@ -1248,6 +1253,24 @@ int switch_pen_input_device(void) {
 nvt_set_pen_enable_out:
 	mutex_unlock(&ts->pen_switch_lock);
 	NVT_LOG("--\n");
+
+	return ret;
+}
+
+/* Lock order: ts->lock, then ts->pen_switch_lock. Do not call with ts->lock held. */
+int switch_pen_input_device(void) {
+	int ret;
+
+	if (!ts || !bTouchIsAwake) {
+		NVT_LOG("touch suspend, stop switch");
+		return 0;
+	}
+
+	msleep(35);
+	mutex_lock(&ts->lock);
+	/* the locked function checks bTouchIsAwake again: a suspend can run during the sleep */
+	ret = switch_pen_input_device_locked();
+	mutex_unlock(&ts->lock);
 
 	return ret;
 }
@@ -1834,7 +1857,9 @@ static irqreturn_t nvt_ts_work_func(int irq, void *data)
 			nvt_update_firmware(ts->fw_name);
 		}
 		nvt_all_para_recovery();
-		switch_pen_input_device();
+		/* ts->lock is held here */
+		msleep(35);
+		switch_pen_input_device_locked();
 		goto XFER_ERROR;
 	}
 #endif /* #if NVT_TOUCH_WDT_RECOVERY */
@@ -2712,19 +2737,32 @@ static void nvt_power_supply_work(struct work_struct *work)
 	int32_t ret;
 
 	mutex_lock(&ts->power_supply_lock);
+	/*
+	 * ts->lock: no SPI command during a firmware download or a suspend
+	 * (BUGS-TODO 84). Lock order: power_supply_lock, then ts->lock.
+	 */
+	mutex_lock(&ts->lock);
 	if (bTouchIsAwake) {
 		is_usb_exist = !!power_supply_is_system_supplied();
 		if (is_usb_exist != ts->is_usb_exist || ts->is_usb_exist < 0) {
-			ts->is_usb_exist = is_usb_exist;
 			NVT_LOG("USB is %s", is_usb_exist ? "exist" : "not exist");
-			buf[0] = EVENT_MAP_HOST_CMD;
-			buf[1] = is_usb_exist ? 0x53 : 0x51;
-			buf[2] = 0x00;
-			ret = CTP_SPI_WRITE(ts->client, buf, 3);
-			if (ret)
-				NVT_ERR("USB status set failed, ret = %d!", ret);
+			/* host commands need the event buffer page (as the touch feature and pen commands) */
+			ret = nvt_set_page(ts->mmap->EVENT_BUF_ADDR | EVENT_MAP_HOST_CMD);
+			if (ret < 0) {
+				NVT_ERR("Set event buffer index fail!\n");
+			} else {
+				buf[0] = EVENT_MAP_HOST_CMD;
+				buf[1] = is_usb_exist ? 0x53 : 0x51;
+				buf[2] = 0x00;
+				ret = CTP_SPI_WRITE(ts->client, buf, 3);
+				if (ret)
+					NVT_ERR("USB status set failed, ret = %d!", ret);
+				else
+					ts->is_usb_exist = is_usb_exist;	/* a failed command is sent again at the next event */
+			}
 		}
 	}
+	mutex_unlock(&ts->lock);
 	mutex_unlock(&ts->power_supply_lock);
 }
 
