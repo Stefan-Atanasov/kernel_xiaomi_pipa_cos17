@@ -3771,6 +3771,7 @@ static int32_t nvt_ts_suspend(struct device *dev)
 {
 	uint8_t ret = 0;
 	uint8_t buf[4] = {0};
+	int db_wakeup;
 #if MT_PROTOCOL_B
 	uint32_t i = 0;
 	int enable = 0;
@@ -3784,7 +3785,9 @@ static int32_t nvt_ts_suspend(struct device *dev)
 	pm_stay_awake(dev);
 	ts->ic_state = NVT_IC_SUSPEND_IN;
 
-	if (!ts->db_wakeup)
+	/* one value for the whole suspend: the flag can change at any time (sysfs, touch HAL) */
+	db_wakeup = ts->db_wakeup;
+	if (!db_wakeup)
 		nvt_irq_enable(false);
 
 #if NVT_TOUCH_ESD_PROTECT
@@ -3799,7 +3802,7 @@ static int32_t nvt_ts_suspend(struct device *dev)
 
 	bTouchIsAwake = 0;
 
-	if (ts->db_wakeup & 0x01 || ts->db_wakeup & 0x02) {
+	if (db_wakeup & 0x01 || db_wakeup & 0x02) {
 		/*---write command to enter "wakeup gesture mode"---*/
 		/*DoubleClick wakeup CMD was sent by display to meet timing*/
 
@@ -3809,7 +3812,7 @@ static int32_t nvt_ts_suspend(struct device *dev)
 
 		enable_irq_wake(ts->client->irq);
 
-		enable = (ts->db_wakeup & 0x02);
+		enable = (db_wakeup & 0x02);
 		memset(buf, 0, sizeof(buf));
 		buf[0] = EVENT_MAP_HOST_CMD;
 		buf[1] = 0x7B;
@@ -3817,7 +3820,7 @@ static int32_t nvt_ts_suspend(struct device *dev)
 		msleep(250);
 		CTP_SPI_WRITE(ts->client, buf, 3);
 		NVT_LOG("%s pen wakeup gesture\n", enable ? "Enable" : "Disable");
-	} else if (ts->db_wakeup == 0) {
+	} else if (db_wakeup == 0) {
 		/*---write command to enter "deep sleep mode"---*/
 		buf[0] = EVENT_MAP_HOST_CMD;
 		buf[1] = 0x11;
@@ -3903,7 +3906,8 @@ static int32_t nvt_ts_resume(struct device *dev)
 	NVT_LOG("start\n");
 
 	ts->ic_state = NVT_IC_RESUME_IN;
-	if (!ts->db_wakeup) {
+	/* always: the suspend may have used the sleep pin state (db_wakeup was 0 then); a second select is harmless */
+	{
 		if (ts->ts_pinctrl) {
 			ret = pinctrl_select_state(ts->ts_pinctrl, ts->pinctrl_state_active);
 			if (ret < 0) {
@@ -3932,9 +3936,14 @@ static int32_t nvt_ts_resume(struct device *dev)
 		}
 	}
 
-	if (!ts->db_wakeup) {
-		nvt_irq_enable(true);
-	}
+	/*
+	 * Always enable the IRQ here (nvt_irq_enable() does nothing when it is on).
+	 * The old test "if (!ts->db_wakeup)" used the flag of this moment. The
+	 * suspend used the flag of its moment. /sys/touchpanel/double_tap (power
+	 * HAL) can change it between the two: then the IRQ stayed off and touch
+	 * was dead after the screen came on (BUGS-TODO 84).
+	 */
+	nvt_irq_enable(true);
 
 #if NVT_TOUCH_ESD_PROTECT
 	nvt_esd_check_enable(false);
