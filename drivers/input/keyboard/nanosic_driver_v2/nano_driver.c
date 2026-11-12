@@ -283,6 +283,7 @@ static void keyboard_resume_work(struct work_struct *work)
         dbgprint(ERROR_LEVEL,"keyboard_resume_work: Nanosic_cache_put err:%d\n",ret);
     Nanosic_GPIO_sleep(true);
     g_panel_status = true;
+    Nanosic_input_panel(true);
     Nanosic_workQueue_schedule(gI2c_client->worker);
     ret = Nanosic_RequestGensor_notify();
     if(ret < 0)
@@ -297,6 +298,7 @@ static void keyboard_suspend_work(struct work_struct *work)
     dbgprint(ALERT_LEVEL,"keyboard_suspend_work: enter\n");
     Nanosic_GPIO_sleep(false);
     g_panel_status = false;
+    Nanosic_input_panel(false);
 }
 
 static int xiaomi_keyboard_pm_suspend(struct device *dev)

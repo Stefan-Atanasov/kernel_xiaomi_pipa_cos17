@@ -428,6 +428,12 @@ Nanosic_chardev_fops_write(
 
     rawdata_show("write cmd",data,copy);
 
+    /* pipa: 32 FF <0|1> from xiaomi-keyboard = keypad folded away / usable (not an MCU command) */
+    if(copy == 3 && (u8)data[0] == 0x32 && (u8)data[1] == 0xFF){
+        Nanosic_input_set_enabled(data[2] != 0);
+        return copy;
+    }
+
     if(copy != I2C_DATA_LENGTH_WRITE)
         return copy;
 
@@ -467,6 +473,9 @@ Nanosic_chardev_fops_release(
         return -EINVAL;
 
     Nanosic_chardev_client_deregister(client);
+
+    /* pipa: the daemon is gone (keyboard guard stop or crash): never leave the keypad off */
+    Nanosic_input_set_enabled(true);
 
     module_put(THIS_MODULE);
 

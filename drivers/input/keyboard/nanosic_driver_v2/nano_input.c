@@ -22,6 +22,8 @@
 #include <linux/module.h>
 #include <linux/input.h>
 #include <linux/hid.h>
+#include <linux/proc_fs.h>
+#include <linux/seq_file.h>
 
 #include "nano_macro.h"
 #include "nano_input.h"
@@ -42,6 +44,59 @@ static DEFINE_MUTEX(gInputLock);
 static bool gInputAttached;
 static bool gInputWant;
 static struct work_struct gInputWork;
+
+/*
+ * pipa: fold state. xiaomi-keyboard (userspace) computes the cover angle from the tablet
+ * and keypad accelerometers and writes 32 FF 00 to nanodev0 when the keypad is closed or
+ * folded behind the tablet, 32 FF 01 when it is usable again (stock HyperOS does the same
+ * in miui-services and disables the input devices). This driver used to drop the write.
+ *   gFoldReq  last request of the daemon (true = keypad away)
+ *   gFoldOff  applied state. A request to disable applies after fold_debounce_ms without
+ *             an enable in between: the daemon flips for a moment while the tablet moves
+ *             (power button press, wake). Enable applies at once.
+ *   fold_remove=0  the devices stay and their reports are dropped (works with every ROM)
+ *   fold_remove=1  the devices are removed, as on detach: Android sees no hardware
+ *             keyboard, so the on-screen keyboard returns. Needs a xiaomi-keyboard that
+ *             does not use /dev/input/event12 as its "keypad present" flag.
+ */
+static bool gFoldReq;
+static bool gFoldOff;
+static bool gPanelOn = true;
+static struct delayed_work gFoldWork;
+static bool fold_remove;
+module_param(fold_remove, bool, 0644);
+static unsigned int fold_debounce_ms = 1000;
+module_param(fold_debounce_ms, uint, 0644);
+module_param_named(fold_off, gFoldOff, bool, 0444);
+
+/*
+ * pipa: /proc/nanokbd exists while the keypad is attached (MCU hall status or a keypad
+ * report), whatever the fold state and the event numbers. A xiaomi-keyboard patched to
+ * access() it instead of /dev/input/event12 samples the accelerometer exactly while a
+ * keypad is there: no idle drain without one, and it can see the unfold after the input
+ * devices were removed. Called with gInputLock held.
+ */
+static bool gPresent;
+
+static int
+Nanosic_input_proc_show(struct seq_file *m, void *v)
+{
+	seq_printf(m, "attached=%d input=%d fold_req=%d fold_off=%d fold_remove=%d debounce_ms=%u\n",
+		gInputWant, gInputAttached, gFoldReq, gFoldOff, fold_remove, fold_debounce_ms);
+	return 0;
+}
+
+static void
+Nanosic_input_present(bool present)
+{
+	if(gPresent == present)
+		return;
+	if(!present)
+		remove_proc_entry("nanokbd", NULL);
+	else if(!proc_create_single("nanokbd", 0444, NULL, Nanosic_input_proc_show))
+		return;
+	gPresent = present;
+}
 static int Nanosic_input_attach(void);
 static void Nanosic_input_detach(void);
 
@@ -99,9 +154,17 @@ Nanosic_input_write(EM_PacketType type ,void *buf, size_t len)
         return 0;
 
     mutex_lock(&gInputLock);
-    if(!gInputAttached && Nanosic_input_attach() < 0){
+    if(gFoldOff){
+        /* folded away: no report, and no attach from a key pressed against the table */
         mutex_unlock(&gInputLock);
         return 0;
+    }
+    if(!gInputAttached){
+        if(Nanosic_input_attach() < 0){
+            mutex_unlock(&gInputLock);
+            return 0;
+        }
+        Nanosic_input_present(true);
     }
 	switch(type)
 	{
@@ -368,10 +431,84 @@ static void
 Nanosic_input_work(struct work_struct *work)
 {
 	mutex_lock(&gInputLock);
-	if(gInputWant && !gInputAttached)
-		Nanosic_input_attach();
-	else
+	Nanosic_input_present(gInputWant);
+	if(!gInputWant)
 		Nanosic_input_detach();
+	else if(!gInputAttached && !gFoldOff)
+		Nanosic_input_attach();
+	mutex_unlock(&gInputLock);
+}
+
+/* the debounce time passed without an enable: apply the fold */
+static void
+Nanosic_input_fold_work(struct work_struct *work)
+{
+	static const u8 kbd_up[9] = { 0x05 };
+	static const u8 consumer_up[5] = { 0x06 };
+	u8 buf[9];
+
+	mutex_lock(&gInputLock);
+	if(gFoldReq && !gFoldOff && gPanelOn){
+		gFoldOff = true;
+		if(gInputAttached){
+			if(fold_remove){
+				Nanosic_input_detach();
+			}else{
+				/* release what is held: a key down now would repeat for ever */
+				memcpy(buf, kbd_up, sizeof(kbd_up));
+				hid_input_report(gVirtualKeyboardDev, HID_INPUT_REPORT, buf, sizeof(kbd_up), 0);
+				memcpy(buf, consumer_up, sizeof(consumer_up));
+				hid_input_report(gVirtualConsumerDev, HID_INPUT_REPORT, buf, sizeof(consumer_up), 0);
+			}
+		}
+		dbgprint(ALERT_LEVEL,"keypad folded away, input %s\n", fold_remove ? "removed" : "muted");
+	}
+	mutex_unlock(&gInputLock);
+}
+
+/** ************************************************************************//**
+ *  @func Nanosic_input_set_enabled
+ *
+ *  @brief fold request from xiaomi-keyboard (32 FF 00/01), or true when it closes nanodev0
+ *
+ ** */
+void
+Nanosic_input_set_enabled(bool enabled)
+{
+	mutex_lock(&gInputLock);
+	gFoldReq = !enabled;
+	if(enabled){
+		cancel_delayed_work(&gFoldWork);
+		if(gFoldOff){
+			gFoldOff = false;
+			if(gInputWant && !gInputAttached)
+				Nanosic_input_attach();
+			dbgprint(ALERT_LEVEL,"keypad unfolded, input on\n");
+		}
+	}else if(!gFoldOff && gPanelOn){
+		/* no-op while one is pending: repeated requests do not push the deadline */
+		schedule_delayed_work(&gFoldWork, msecs_to_jiffies(fold_debounce_ms));
+	}
+	mutex_unlock(&gInputLock);
+}
+
+/** ************************************************************************//**
+ *  @func Nanosic_input_panel
+ *
+ *  @brief screen state. The keypad MCU sleeps with the screen and the daemon keeps its last
+ *         answer, often a false "away" from pressing the power button: nothing is applied
+ *         while the screen is off; after the wake a still pending request counts again.
+ *
+ ** */
+void
+Nanosic_input_panel(bool on)
+{
+	mutex_lock(&gInputLock);
+	gPanelOn = on;
+	if(!on)
+		cancel_delayed_work(&gFoldWork);
+	else if(gFoldReq && !gFoldOff)
+		schedule_delayed_work(&gFoldWork, msecs_to_jiffies(fold_debounce_ms));
 	mutex_unlock(&gInputLock);
 }
 
@@ -400,6 +537,7 @@ int
 Nanosic_input_register(void)
 {
 	INIT_WORK(&gInputWork, Nanosic_input_work);
+	INIT_DELAYED_WORK(&gFoldWork, Nanosic_input_fold_work);
 	return 0;
 }
 
@@ -413,8 +551,10 @@ int
 Nanosic_input_release(void)
 {
 	cancel_work_sync(&gInputWork);
+	cancel_delayed_work_sync(&gFoldWork);
 	mutex_lock(&gInputLock);
 	Nanosic_input_detach();
+	Nanosic_input_present(false);
 	mutex_unlock(&gInputLock);
 
 	return 0;
