@@ -22,6 +22,8 @@
 #include <linux/module.h>
 #include <linux/input.h>
 #include <linux/hid.h>
+#include <linux/workqueue.h>
+#include <linux/mutex.h>
 
 #include "nano_macro.h"
 
@@ -40,9 +42,51 @@ typedef struct cache_s {
     spinlock_t cache_spinlock;
     struct timer_list cache_timer;
     uint8_t cache_cnt;
+    struct work_struct cache_work;
 }input_cache_t;
 
 static input_cache_t gInputCache;
+
+/*
+ * pipa: Nanosic_input_write() takes the gInputLock mutex and can create the HID devices, so it
+ * must run in process context and never under cache_spinlock. The timer only queues the drain;
+ * the drain takes one entry at a time under the spinlock (bh: the timer is a softirq) and writes
+ * it after the unlock. cache_drain_lock keeps the key order when the i2c worker and the resume
+ * work drain at the same time.
+ */
+static DEFINE_MUTEX(cache_drain_lock);
+
+static void
+Nanosic_cache_drain(void)
+{
+    input_cache_t* input_cache = &gInputCache;
+    cahae_buffer_t node;
+    bool have;
+
+    mutex_lock(&cache_drain_lock);
+    for(;;){
+        have = false;
+        spin_lock_bh(&input_cache->cache_spinlock);
+        if(input_cache->cache_cnt){
+            node = input_cache->cache_buf[input_cache->cache_read_pos % MAX_CACHE_BLOCKS];
+            input_cache->cache_read_pos ++;
+            input_cache->cache_cnt--;
+            have = true;
+        }
+        spin_unlock_bh(&input_cache->cache_spinlock);
+        if(!have)
+            break;
+        rawdata_show("cache put",node.data,node.datalen);
+        Nanosic_input_write(node.type,node.data,node.datalen);
+    }
+    mutex_unlock(&cache_drain_lock);
+}
+
+static void
+Nanosic_cache_work(struct work_struct *work)
+{
+    Nanosic_cache_drain();
+}
 
 /** **************************************************************************
  * @func  Nanosic_cache_expire
@@ -52,31 +96,8 @@ static input_cache_t gInputCache;
  ** */
 void Nanosic_cache_expire(struct timer_list *t)
 {
-    input_cache_t* input_cache = &gInputCache;
-    cahae_buffer_t* cache_node;
-    __u8 read_pos;
-
     dbgprint(INFO_LEVEL, "cache time expire\n");
-
-    if(IS_ERR_OR_NULL(input_cache)){
-        dbgprint(ERROR_LEVEL, "invalid cache struct\n");
-        return;
-    }
-
-    spin_lock(&input_cache->cache_spinlock);
-
-    while(input_cache->cache_cnt)
-    {
-        read_pos = input_cache->cache_read_pos % MAX_CACHE_BLOCKS;
-        cache_node = &input_cache->cache_buf[read_pos];
-        rawdata_show("cache put",cache_node->data,cache_node->datalen);
-        Nanosic_input_write(cache_node->type,cache_node->data,cache_node->datalen);
-        input_cache->cache_read_pos ++;
-        input_cache->cache_cnt--;
-    }
-
-    spin_unlock(&input_cache->cache_spinlock);
-    return;
+    schedule_work(&gInputCache.cache_work);
 }
 
 /** **************************************************************************
@@ -88,31 +109,8 @@ void Nanosic_cache_expire(struct timer_list *t)
 int
 Nanosic_cache_put(void)
 {
-    input_cache_t* input_cache = &gInputCache;
-    cahae_buffer_t* cache_node;
-    __u8 read_pos;
-
-    if(IS_ERR_OR_NULL(input_cache)){
-        dbgprint(ERROR_LEVEL, "invalid cache struct\n");
-        return 0;
-    }
-
-    if(timer_pending(&input_cache->cache_timer))
-        del_timer_sync(&input_cache->cache_timer);
-
-    spin_lock(&input_cache->cache_spinlock);
-
-    while(input_cache->cache_cnt)
-    {
-        read_pos = input_cache->cache_read_pos % MAX_CACHE_BLOCKS;
-        cache_node = &input_cache->cache_buf[read_pos];
-        rawdata_show("cache put",cache_node->data,cache_node->datalen);
-        Nanosic_input_write(cache_node->type,cache_node->data,cache_node->datalen);
-        input_cache->cache_read_pos ++;
-        input_cache->cache_cnt--;
-    }
-
-    spin_unlock(&input_cache->cache_spinlock);
+    del_timer_sync(&gInputCache.cache_timer);
+    Nanosic_cache_drain();
     return 0;
 }
 
@@ -135,7 +133,10 @@ Nanosic_cache_insert(EM_PacketType type ,void *data, size_t datalen)
 
     rawdata_show("cache insert",data,datalen);
 
-    spin_lock(&input_cache->cache_spinlock);
+    if(datalen > sizeof(input_cache->cache_buf[0].data))
+        return -1;
+
+    spin_lock_bh(&input_cache->cache_spinlock);
 
     if (input_cache->cache_cnt < MAX_CACHE_BLOCKS)
     {
@@ -152,7 +153,7 @@ Nanosic_cache_insert(EM_PacketType type ,void *data, size_t datalen)
         ret = -1;
         dbgprint(INFO_LEVEL, "cache is full\n");
     }
-    spin_unlock(&input_cache->cache_spinlock);
+    spin_unlock_bh(&input_cache->cache_spinlock);
 
     return ret;
 }
@@ -172,6 +173,7 @@ Nanosic_cache_init(void)
     input_cache->cache_write_pos = 0;
     input_cache->cache_cnt = 0;
     spin_lock_init(&input_cache->cache_spinlock);
+    INIT_WORK(&input_cache->cache_work, Nanosic_cache_work);
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4,14,0)
     setup_timer(&input_cache->cache_timer, Nanosic_cache_expire, 0);
 #else
@@ -193,9 +195,8 @@ Nanosic_cache_release(void)
 {
     input_cache_t* input_cache = &gInputCache;
 
-    if(timer_pending(&input_cache->cache_timer)){
-        del_timer(&input_cache->cache_timer);
-    }
+    del_timer_sync(&input_cache->cache_timer);
+    cancel_work_sync(&input_cache->cache_work);
 	dbgprint(INFO_LEVEL,"cache release ok\n");
 	return 0;
 }
