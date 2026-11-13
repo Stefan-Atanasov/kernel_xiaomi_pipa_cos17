@@ -185,6 +185,9 @@ struct nvt_ts_data {
 	uint16_t addr;
 	int8_t phys[32];
 #if defined(CONFIG_DRM_PANEL)
+	struct delayed_work fw_retry_work;
+	bool panel_unblank;
+	u8 fw_retry_count;
 	struct notifier_block drm_panel_notif;
 #elif defined(_MSM_DRM_NOTIFY_H_)
 	struct notifier_block drm_notif;

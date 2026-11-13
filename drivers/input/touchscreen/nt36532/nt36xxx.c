@@ -2940,6 +2940,76 @@ static const struct file_operations tpdbg_ops = {
 #endif
 
 
+#if defined(CONFIG_DRM_PANEL)
+#define NVT_FW_RETRY_DELAY_MS 500
+#define NVT_FW_RETRY_MAX 3
+
+/* Failure-only recovery. The display driver owns the physical reset/rails. */
+static void nvt_fw_retry_work(struct work_struct *work)
+{
+	struct nvt_ts_data *ts = container_of(to_delayed_work(work),
+					    struct nvt_ts_data, fw_retry_work);
+	struct device *dev = &ts->client->dev;
+	int ret;
+
+	pm_stay_awake(dev);
+	mutex_lock(&ts->lock);
+	if (!READ_ONCE(ts->panel_unblank) || !bTouchIsAwake ||
+	    ts->dev_pm_suspend || ts->fw_retry_count >= NVT_FW_RETRY_MAX)
+		goto out;
+
+	ts->fw_retry_count++;
+	release_touch_event();
+	release_pen_event();
+	if (ts->ts_pinctrl) {
+		ret = pinctrl_select_state(ts->ts_pinctrl,
+					  ts->pinctrl_state_active);
+		if (ret)
+			goto result;
+	}
+
+	/* Repeat the probe's engineering reset + settle, then the full download.
+	 * On pipa there is no touch-owned GPIO reset. This is still SPI-only.
+	 */
+	nvt_eng_reset();
+	usleep_range(10000, 11000);
+	if (nvt_get_dbgfw_status()) {
+		ret = nvt_update_firmware(DEFAULT_DEBUG_FW_NAME);
+		if (ret < 0)
+			ret = nvt_update_firmware(ts->fw_name);
+	} else {
+		ret = nvt_update_firmware(ts->fw_name);
+	}
+	if (!ret)
+		ret = nvt_check_fw_reset_state(RESET_STATE_REK);
+result:
+	if (ret) {
+		NVT_ERR("r21: FW retry %u/%u failed (%d)%s\n",
+			ts->fw_retry_count, NVT_FW_RETRY_MAX, ret,
+			ts->fw_retry_count == NVT_FW_RETRY_MAX ?
+			", giving up" : "");
+		if (ts->fw_retry_count < NVT_FW_RETRY_MAX &&
+		    READ_ONCE(ts->panel_unblank))
+			queue_delayed_work(system_freezable_wq, &ts->fw_retry_work,
+					   msecs_to_jiffies(NVT_FW_RETRY_DELAY_MS));
+	} else {
+		NVT_LOG("r21: FW retry %u/%u recovered\n",
+			ts->fw_retry_count, NVT_FW_RETRY_MAX);
+#ifdef CONFIG_TOUCHSCREEN_XIAOMI_TOUCHFEATURE
+		nvt_all_para_recovery();
+#else
+		ts->is_usb_exist = -1;
+		queue_work(ts->event_wq, &ts->power_supply_work);
+#endif
+		msleep(35);
+		switch_pen_input_device_locked();
+	}
+out:
+	mutex_unlock(&ts->lock);
+	pm_relax(dev);
+}
+#endif
+
 static void nvt_resume_work(struct work_struct *work)
 {
 	struct nvt_ts_data *ts_core = container_of(work, struct nvt_ts_data, resume_work);
@@ -3354,6 +3424,9 @@ static int32_t nvt_ts_probe(struct spi_device *client)
 	}
 
 	INIT_WORK(&ts->resume_work, nvt_resume_work);
+#if defined(CONFIG_DRM_PANEL)
+	INIT_DELAYED_WORK(&ts->fw_retry_work, nvt_fw_retry_work);
+#endif
 
 #ifdef CONFIG_TOUCHSCREEN_XIAOMI_TOUCHFEATURE
 	ts->set_touchfeature_wq = create_singlethread_workqueue("nvt-set-touchfeature-queue");
@@ -3577,10 +3650,11 @@ static int32_t nvt_ts_remove(struct spi_device *client)
 	NVT_LOG("Removing driver...\n");
 
 #if defined(CONFIG_DRM_PANEL)
-	if (active_panel) {
-		if (mi_drm_unregister_client(&ts->drm_panel_notif))
-			NVT_ERR("Error occurred while unregistering drm_panel_notifier.\n");
-	}
+	if (mi_drm_unregister_client(&ts->drm_panel_notif))
+		NVT_ERR("Error occurred while unregistering drm_panel_notifier.\n");
+	WRITE_ONCE(ts->panel_unblank, false);
+	cancel_work_sync(&ts->resume_work);
+	cancel_delayed_work_sync(&ts->fw_retry_work);
 #elif defined(_MSM_DRM_NOTIFY_H_)
 	if (msm_drm_unregister_client(&ts->drm_notif))
 		NVT_ERR("Error occurred while unregistering drm_notifier.\n");
@@ -3690,10 +3764,11 @@ static void nvt_ts_shutdown(struct spi_device *client)
 	nvt_irq_enable(false);
 
 #if defined(CONFIG_DRM_PANEL)
-	if (active_panel) {
-		if (mi_drm_unregister_client(&ts->drm_panel_notif))
-			NVT_ERR("Error occurred while unregistering drm_panel_notifier.\n");
-	}
+	if (mi_drm_unregister_client(&ts->drm_panel_notif))
+		NVT_ERR("Error occurred while unregistering drm_panel_notifier.\n");
+	WRITE_ONCE(ts->panel_unblank, false);
+	cancel_work_sync(&ts->resume_work);
+	cancel_delayed_work_sync(&ts->fw_retry_work);
 #elif defined(_MSM_DRM_NOTIFY_H_)
 	if (msm_drm_unregister_client(&ts->drm_notif))
 		NVT_ERR("Error occurred while unregistering drm_notifier.\n");
@@ -3777,6 +3852,10 @@ static int32_t nvt_ts_suspend(struct device *dev)
 	int enable = 0;
 #endif
 
+#if defined(CONFIG_DRM_PANEL)
+	/* No retry may outlive the display's suspend/reset/power-down. */
+	cancel_delayed_work_sync(&ts->fw_retry_work);
+#endif
 	if (!bTouchIsAwake) {
 		NVT_LOG("Touch is already suspend\n");
 		return 0;
@@ -3924,17 +4003,28 @@ static int32_t nvt_ts_resume(struct device *dev)
 	gpio_set_value(ts->reset_gpio, 1);
 #endif
 	if (nvt_get_dbgfw_status()) {
-		if (nvt_update_firmware(DEFAULT_DEBUG_FW_NAME) < 0) {
+		ret = nvt_update_firmware(DEFAULT_DEBUG_FW_NAME);
+		if (ret < 0) {
 			NVT_ERR("use built-in fw");
-			nvt_update_firmware(ts->fw_name);
+			ret = nvt_update_firmware(ts->fw_name);
 		}
 	} else {
-		if (nvt_update_firmware(ts->fw_name)) {
+		ret = nvt_update_firmware(ts->fw_name);
+		if (ret)
 			NVT_ERR("download firmware failed, ignore check fw state\n");
-		} else {
+		else
 			nvt_check_fw_reset_state(RESET_STATE_REK);
-		}
 	}
+#if defined(CONFIG_DRM_PANEL)
+	ts->fw_retry_count = 0;
+	if (ret && READ_ONCE(ts->panel_unblank)) {
+		NVT_ERR("r21: resume FW failed (%d), retry in %u ms\n",
+			ret, NVT_FW_RETRY_DELAY_MS);
+		/* Freezable: retries cannot execute during system device suspend. */
+		mod_delayed_work(system_freezable_wq, &ts->fw_retry_work,
+				 msecs_to_jiffies(NVT_FW_RETRY_DELAY_MS));
+	}
+#endif
 
 	/*
 	 * Always enable the IRQ here (nvt_irq_enable() does nothing when it is on).
@@ -4002,12 +4092,14 @@ static int nvt_drm_panel_notifier_callback(struct notifier_block *self, unsigned
 		blank = evdata->data;
 		if (event == MI_DRM_PRE_EVENT_BLANK) {
 			if (*blank == MI_DRM_BLANK_POWERDOWN) {
+				WRITE_ONCE(ts->panel_unblank, false);
 				NVT_LOG("event=%lu, *blank=%d\n", event, *blank);
 				flush_workqueue(ts->event_wq);
 				nvt_ts_suspend(&ts->client->dev);
 			}
 		} else if (event == MI_DRM_EVENT_BLANK) {
 			if (*blank == MI_DRM_BLANK_UNBLANK) {
+				WRITE_ONCE(ts->panel_unblank, true);
 				NVT_LOG("event=%lu, *blank=%d\n", event, *blank);
 				flush_workqueue(ts->event_wq);
 				queue_work(ts->event_wq, &ts->resume_work);
