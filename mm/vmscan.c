@@ -31,6 +31,11 @@
 #include <linux/buffer_head.h>	/* for try_to_release_page(),
 					buffer_heads_over_limit */
 #include <linux/mm_inline.h>
+#include <linux/proc_fs.h>
+#include <linux/uaccess.h>
+#if defined(OPLUS_FEATURE_MULTI_KSWAPD) && defined(CONFIG_OPLUS_MULTI_KSWAPD)
+#include <linux/multi_kswapd.h>
+#endif
 #include <linux/backing-dev.h>
 #include <linux/rmap.h>
 #include <linux/topology.h>
@@ -138,12 +143,14 @@ struct scan_control {
 	struct vm_area_struct *target_vma;
 };
 
+#ifndef CONFIG_OPLUS_MULTI_KSWAPD
 /*
  * Number of active kswapd threads
  */
 #define DEF_KSWAPD_THREADS_PER_NODE 1
 int kswapd_threads = DEF_KSWAPD_THREADS_PER_NODE;
 int kswapd_threads_current = DEF_KSWAPD_THREADS_PER_NODE;
+#endif /*CONFIG_OPLUS_MULTI_KSWAPD*/
 
 #ifdef ARCH_HAS_PREFETCH
 #define prefetch_prev_lru_page(_page, _base, _field)			\
@@ -177,6 +184,12 @@ int kswapd_threads_current = DEF_KSWAPD_THREADS_PER_NODE;
  * From 0 .. 100.  Higher means more swappy.
  */
 int vm_swappiness = 60;
+#if defined(OPLUS_FEATURE_ZRAM_OPT) && defined(CONFIG_OPLUS_ZRAM_OPT)
+/*
+ * Direct reclaim swappiness, exptct 0 - 60. Higher means more swappy and slower.
+ */
+int direct_vm_swappiness = 60;
+#endif /*OPLUS_FEATURE_ZRAM_OPT*/
 /*
  * The total number of pages which are beyond the high watermark within all
  * zones.
@@ -1960,6 +1973,10 @@ putback_inactive_pages(struct lruvec *lruvec, struct list_head *page_list)
  */
 static int current_may_throttle(void)
 {
+#if defined(OPLUS_FEATURE_ZRAM_OPT) && defined(CONFIG_OPLUS_ZRAM_OPT)
+	if (current->signal->oom_score_adj < 0)
+		return 0;
+#endif /*OPLUS_FEATURE_ZRAM_OPT*/
 	return !(current->flags & PF_LESS_THROTTLE) ||
 		current->backing_dev_info == NULL ||
 		bdi_write_congested(current->backing_dev_info);
@@ -2307,8 +2324,13 @@ static bool inactive_list_is_low(struct lruvec *lruvec, bool file,
 		inactive_ratio = 0;
 	} else {
 		gb = (inactive + active) >> (30 - PAGE_SHIFT);
+#if defined(OPLUS_FEATURE_ZRAM_OPT) && defined(CONFIG_OPLUS_ZRAM_OPT)
+		if (file && gb)
+			inactive_ratio = min(2UL, int_sqrt(10 * gb));
+#else
 		if (gb)
 			inactive_ratio = int_sqrt(10 * gb);
+#endif /*OPLUS_FEATURE_ZRAM_OPT*/
 		else
 			inactive_ratio = 1;
 	}
@@ -2364,9 +2386,19 @@ static void get_scan_count(struct lruvec *lruvec, struct mem_cgroup *memcg,
 	unsigned long anon, file;
 	unsigned long ap, fp;
 	enum lru_list lru;
+#if defined(OPLUS_FEATURE_ZRAM_OPT) && defined(CONFIG_OPLUS_ZRAM_OPT)
+	unsigned long totalswap = total_swap_pages;
+
+	/* use vm_swappiness defaultly */
+	swappiness = vm_swappiness;
+	if (!current_is_kswapd())
+		swappiness = direct_vm_swappiness;
+	if (!sc->may_swap || (mem_cgroup_get_nr_swap_pages(memcg) <= totalswap>>6)) {
+#else
 
 	/* If we have no swap space, do not bother scanning anon pages. */
 	if (!sc->may_swap || mem_cgroup_get_nr_swap_pages(memcg) <= 0) {
+#endif /*OPLUS_FEATURE_ZRAM_OPT*/
 		scan_balance = SCAN_FILE;
 		goto out;
 	}
@@ -3935,7 +3967,11 @@ static void kswapd_try_to_sleep(pg_data_t *pgdat, int alloc_order, int reclaim_o
  * If there are applications that are active memory-allocators
  * (most normal use), this basically shouldn't matter.
  */
+#if defined(OPLUS_FEATURE_MULTI_KSWAPD) && defined(CONFIG_OPLUS_MULTI_KSWAPD)
+int kswapd(void *p)
+#else
 static int kswapd(void *p)
+#endif
 {
 	unsigned int alloc_order, reclaim_order;
 	unsigned int classzone_idx = MAX_NR_ZONES - 1;
@@ -3945,7 +3981,17 @@ static int kswapd(void *p)
 	struct reclaim_state reclaim_state = {
 		.reclaimed_slab = 0,
 	};
+#if defined(OPLUS_FEATURE_MULTI_KSWAPD) && defined(CONFIG_KSWAPD_UNBIND_MAX_CPU)
+	struct cpumask mask;
+	struct cpumask *cpumask = &mask;
+
+	cpumask_copy(cpumask, cpumask_of_node(pgdat->node_id));
+	if (kswapd_unbind_cpu != -1 &&
+			cpumask_test_cpu(kswapd_unbind_cpu, cpumask))
+		cpumask_clear_cpu(kswapd_unbind_cpu, cpumask);
+#else
 	const struct cpumask *cpumask = cpumask_of_node(pgdat->node_id);
+#endif
 
 	if (!cpumask_empty(cpumask))
 		set_cpus_allowed_ptr(tsk, cpumask);
@@ -4116,6 +4162,9 @@ unsigned long shrink_all_memory(unsigned long nr_to_reclaim)
    restore their cpu bindings. */
 static int kswapd_cpu_online(unsigned int cpu)
 {
+#if defined(OPLUS_FEATURE_MULTI_KSWAPD) && defined(CONFIG_OPLUS_MULTI_KSWAPD)
+	return kswapd_cpu_online_ext(cpu);
+#else
 	int nid, hid;
 	int nr_threads = kswapd_threads_current;
 
@@ -4132,8 +4181,10 @@ static int kswapd_cpu_online(unsigned int cpu)
 		}
 	}
 	return 0;
+#endif
 }
 
+#ifndef CONFIG_OPLUS_MULTI_KSWAPD
 static void update_kswapd_threads_node(int nid)
 {
 	pg_data_t *pgdat;
@@ -4191,7 +4242,7 @@ void update_kswapd_threads(void)
 	kswapd_threads_current = kswapd_threads;
 	mem_hotplug_done();
 }
-
+#endif /*CONFIG_OPLUS_MULTI_KSWAPD*/
 
 /*
  * This kswapd start function will be called by init and node-hot-add.
@@ -4199,6 +4250,9 @@ void update_kswapd_threads(void)
  */
 int kswapd_run(int nid)
 {
+#if defined(OPLUS_FEATURE_MULTI_KSWAPD) && defined(CONFIG_OPLUS_MULTI_KSWAPD)
+	return kswapd_run_ext(nid);
+#else
 	pg_data_t *pgdat = NODE_DATA(nid);
 	int ret = 0;
 	int hid, nr_threads;
@@ -4221,6 +4275,7 @@ int kswapd_run(int nid)
 	}
 	kswapd_threads_current = nr_threads;
 	return ret;
+#endif
 }
 
 /*
@@ -4229,6 +4284,9 @@ int kswapd_run(int nid)
  */
 void kswapd_stop(int nid)
 {
+#if defined(OPLUS_FEATURE_MULTI_KSWAPD) && defined(CONFIG_OPLUS_MULTI_KSWAPD)
+	kswapd_stop_ext(nid);
+#else
 	struct task_struct *kswapd;
 	int hid;
 	int nr_threads = kswapd_threads_current;
@@ -4240,6 +4298,7 @@ void kswapd_stop(int nid)
 			NODE_DATA(nid)->kswapd[hid] = NULL;
 		}
 	}
+#endif
 }
 
 static int __init kswapd_init(void)
@@ -4504,3 +4563,117 @@ void check_move_unevictable_pages(struct page **pages, int nr_pages)
 	}
 }
 #endif /* CONFIG_SHMEM */
+
+#if defined(OPLUS_FEATURE_ZRAM_OPT) && defined(CONFIG_OPLUS_ZRAM_OPT)
+#define PARA_BUF_LEN 128
+
+static inline int debug_get_val(char *buf, char *token, unsigned long *val)
+{
+	int ret = -EINVAL;
+	char *str = strstr(buf, token);
+
+	if (!str)
+		return ret;
+
+	ret = kstrtoul(str + strlen(token), 0, val);
+	if (ret)
+		return -EINVAL;
+
+	if (*val > 200) {
+		pr_err("%lu is invalid\n", *val);
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
+static ssize_t swappiness_para_write(struct file *file,
+		const char __user *buff, size_t len, loff_t *ppos)
+{
+	char kbuf[PARA_BUF_LEN] = {'0'};
+	char *str;
+	unsigned long val;
+
+	if (len > PARA_BUF_LEN - 1) {
+		pr_err("len %zu is too long\n", len);
+		return -EINVAL;
+	}
+
+	if (copy_from_user(&kbuf, buff, len))
+		return -EFAULT;
+	kbuf[len] = '\0';
+
+	str = strstrip(kbuf);
+	if (!str) {
+		pr_err("buff %s is invalid\n", kbuf);
+		return -EINVAL;
+	}
+
+	if (!debug_get_val(str, "vm_swappiness=", &val)) {
+		vm_swappiness = val;
+		return len;
+	}
+
+	if (!debug_get_val(str, "direct_swappiness=", &val)) {
+		direct_vm_swappiness = val;
+		return len;
+	}
+
+	return -EINVAL;
+}
+
+static ssize_t swappiness_para_read(struct file *file,
+		char __user *buffer, size_t count, loff_t *off)
+{
+	char kbuf[PARA_BUF_LEN] = {'0'};
+	int len;
+
+	len = snprintf(kbuf, PARA_BUF_LEN, "vm_swappiness: %d\n", vm_swappiness);
+	len += snprintf(kbuf + len, PARA_BUF_LEN - len,
+			"direct_swappiness: %d\n", direct_vm_swappiness);
+
+	if (len == PARA_BUF_LEN)
+		kbuf[len - 1] = '\0';
+
+	if (len > *off)
+		len -= *off;
+	else
+		len = 0;
+
+	if (copy_to_user(buffer, kbuf + *off, (len < count ? len : count)))
+		return -EFAULT;
+
+	*off += (len < count ? len : count);
+	return (len < count ? len : count);
+}
+
+static const struct file_operations proc_swappiness_para_ops = {
+	.write          = swappiness_para_write,
+	.read		= swappiness_para_read,
+};
+
+int create_swappiness_para_proc(void)
+{
+	struct proc_dir_entry * para_entry =
+		proc_create("oplus_healthinfo/swappiness_para",
+				S_IRUSR|S_IWUSR, NULL, &proc_swappiness_para_ops);
+
+	if (para_entry) {
+		printk("Register swappiness_para interface passed.\n");
+		return 0;
+	}
+
+	pr_err("Register swappiness_para interface failed.\n");
+	return -ENOMEM;
+}
+EXPORT_SYMBOL(create_swappiness_para_proc);
+
+/* we have no oplus_healthinfo driver: make its proc dir ourselves if nobody did */
+static int __init oplus_swappiness_para_init(void)
+{
+	if (!proc_mkdir("oplus_healthinfo", NULL))
+		pr_warn("oplus_healthinfo proc dir not created\n");
+	return create_swappiness_para_proc();
+}
+late_initcall(oplus_swappiness_para_init);
+#endif /*OPLUS_FEATURE_ZRAM_OPT*/

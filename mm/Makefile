@@ -94,6 +94,9 @@ obj-$(CONFIG_CLEANCACHE) += cleancache.o
 obj-$(CONFIG_MEMORY_ISOLATION) += page_isolation.o
 obj-$(CONFIG_ZPOOL)	+= zpool.o
 obj-$(CONFIG_ZBUD)	+= zbud.o
+#ifdef OPLUS_FEATURE_MULTI_KSWAPD
+obj-$(CONFIG_OPLUS_MULTI_KSWAPD) += multi_kswapd/
+#endif /*OPLUS_FEATURE_MULTI_KSWAPD*/
 obj-$(CONFIG_ZSMALLOC)	+= zsmalloc.o
 obj-$(CONFIG_Z3FOLD)	+= z3fold.o
 obj-$(CONFIG_GENERIC_EARLY_IOREMAP) += early_ioremap.o

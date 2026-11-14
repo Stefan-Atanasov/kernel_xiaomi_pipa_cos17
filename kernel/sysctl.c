@@ -92,6 +92,9 @@
 #if defined(CONFIG_PROVE_LOCKING) || defined(CONFIG_LOCK_STAT)
 #include <linux/lockdep.h>
 #endif
+#if defined(OPLUS_FEATURE_MULTI_KSWAPD) && defined(CONFIG_OPLUS_MULTI_KSWAPD)
+#include <linux/multi_kswapd.h>
+#endif
 #ifdef CONFIG_CHR_DEV_SG
 #include <scsi/sg.h>
 #endif
@@ -150,8 +153,14 @@ static int ten_thousand = 10000;
 #ifdef CONFIG_PERF_EVENTS
 static int six_hundred_forty_kb = 640 * 1024;
 #endif
+#ifndef CONFIG_OPLUS_MULTI_KSWAPD
 static int max_kswapd_threads = MAX_KSWAPD_THREADS;
+#endif
 static int two_hundred_fifty_five = 255;
+#if defined(OPLUS_FEATURE_ZRAM_OPT) && defined(CONFIG_OPLUS_ZRAM_OPT)
+extern int direct_vm_swappiness;
+static int two_hundred = 200;
+#endif /*OPLUS_FEATURE_ZRAM_OPT*/
 static int __maybe_unused two_hundred_million = 200000000;
 
 #ifdef CONFIG_SCHED_WALT
@@ -2090,8 +2099,23 @@ static struct ctl_table vm_table[] = {
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec_minmax,
 		.extra1		= &zero,
+#if defined(OPLUS_FEATURE_ZRAM_OPT) && defined(CONFIG_OPLUS_ZRAM_OPT)
+		.extra2		= &two_hundred,
+#else
 		.extra2		= &one_hundred,
+#endif /*OPLUS_FEATURE_ZRAM_OPT*/
 	},
+#if defined(OPLUS_FEATURE_ZRAM_OPT) && defined(CONFIG_OPLUS_ZRAM_OPT)
+	{
+		.procname	= "direct_swappiness",
+		.data		= &direct_vm_swappiness,
+		.maxlen		= sizeof(direct_vm_swappiness),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec_minmax,
+		.extra1		= &zero,
+		.extra2		= &two_hundred,
+	},
+#endif /*OPLUS_FEATURE_ZRAM_OPT*/
 	{
 		.procname       = "want_old_faultaround_pte",
 		.data           = &want_old_faultaround_pte,

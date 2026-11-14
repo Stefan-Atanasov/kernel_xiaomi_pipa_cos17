@@ -836,6 +836,10 @@ config GUP_BENCHMARK
 config ARCH_HAS_PTE_SPECIAL
 	bool
 
+#ifdef OPLUS_FEATURE_MULTI_KSWAPD
+source "mm/multi_kswapd/Kconfig"
+#endif /*OPLUS_FEATURE_MULTI_KSWAPD*/
+
 endmenu
 
 config PROCESS_RECLAIM

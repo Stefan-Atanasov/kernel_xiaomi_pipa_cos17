@@ -21,6 +21,10 @@
 #include <linux/android_kabi.h>
 #include <asm/page.h>
 
+#if defined(OPLUS_FEATURE_MULTI_KSWAPD) && defined(CONFIG_OPLUS_MULTI_KSWAPD)
+#include <linux/multi_kswapd.h>
+#endif
+
 /* Free memory management - zoned buddy allocator.  */
 #ifndef CONFIG_FORCE_MAX_ZONEORDER
 #define MAX_ORDER 11
@@ -923,8 +927,10 @@ static inline int is_highmem(struct zone *zone)
 
 /* These two functions are used to setup the per zone pages min values */
 struct ctl_table;
+#ifndef CONFIG_OPLUS_MULTI_KSWAPD
 int kswapd_threads_sysctl_handler(struct ctl_table *, int,
 					void *, size_t *, loff_t *);
+#endif
 int min_free_kbytes_sysctl_handler(struct ctl_table *, int,
 					void *, size_t *, loff_t *);
 int watermark_boost_factor_sysctl_handler(struct ctl_table *, int,

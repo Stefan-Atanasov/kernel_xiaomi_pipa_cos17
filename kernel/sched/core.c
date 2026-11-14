@@ -19,6 +19,11 @@
 
 #include <soc/qcom/minidump.h>
 
+#if defined(OPLUS_FEATURE_MULTI_KSWAPD) && defined(CONFIG_KSWAPD_UNBIND_MAX_CPU)
+/*add multi kswapd support*/
+#include <linux/multi_kswapd.h>
+#endif
+
 #include "../workqueue_internal.h"
 #include "../smpboot.h"
 
@@ -1744,6 +1749,10 @@ void do_set_cpus_allowed(struct task_struct *p, const struct cpumask *new_mask)
 	bool queued, running;
 
 	lockdep_assert_held(&p->pi_lock);
+#if defined(OPLUS_FEATURE_MULTI_KSWAPD) && defined(CONFIG_KSWAPD_UNBIND_MAX_CPU)
+	if (kswapd_affinity_check(p, new_mask))
+		return;
+#endif
 
 	queued = task_on_rq_queued(p);
 	running = task_current(rq, p);
@@ -9003,3 +9012,16 @@ void sched_exit(struct task_struct *p)
 #endif /* CONFIG_SCHED_WALT */
 
 __read_mostly bool sched_predl = 1;
+
+#ifdef CONFIG_KSWAPD_UNBIND_MAX_CPU
+void upate_kswapd_unbind_cpu(void)
+{
+	struct root_domain *rd = NULL;
+
+	rcu_read_lock();
+	rd = cpu_rq(smp_processor_id())->rd;
+	if (rd->mid_cap_orig_cpu != -1 && rd->max_cap_orig_cpu != -1)
+		kswapd_unbind_cpu = rd->max_cap_orig_cpu;
+	rcu_read_unlock();
+}
+#endif

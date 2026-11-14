@@ -8011,6 +8011,7 @@ int watermark_boost_factor_sysctl_handler(struct ctl_table *table, int write,
 	return 0;
 }
 
+#ifndef CONFIG_OPLUS_MULTI_KSWAPD
 int kswapd_threads_sysctl_handler(struct ctl_table *table, int write,
 	void __user *buffer, size_t *length, loff_t *ppos)
 {
@@ -8025,6 +8026,7 @@ int kswapd_threads_sysctl_handler(struct ctl_table *table, int write,
 
 	return 0;
 }
+#endif /*CONFIG_OPLUS_MULTI_KSWAPD*/
 
 int watermark_scale_factor_sysctl_handler(struct ctl_table *table, int write,
 		void *buffer, size_t *length, loff_t *ppos)

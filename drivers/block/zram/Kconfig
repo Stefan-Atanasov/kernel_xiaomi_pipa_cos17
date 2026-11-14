@@ -80,6 +80,15 @@ config ZRAM_DEDUP
 	  enabling this option. Experiment shows the positive effect when
 	  the zram is used as blockdev and is used to store build output.
 
+#ifdef OPLUS_FEATURE_ZRAM_OPT
+config OPLUS_ZRAM_OPT
+	bool "oplus zram  optimization"
+	depends on ZRAM
+	default y
+	help
+	oplus zram optimization
+#endif /*OPLUS_FEATURE_ZRAM_OPT*/
+
 config ZRAM_WRITEBACK
        bool "Write back incompressible or idle page to backing device"
        depends on ZRAM
