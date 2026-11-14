@@ -15,7 +15,7 @@
 #include <linux/device.h>
 #include <linux/cpuhotplug.h>
 #include <linux/cpumask.h>
-#if IS_ENABLED(CONFIG_DRM_MSM) || IS_ENABLED(CONFIG_DRM_OPLUS_NOTIFY)
+#if IS_ENABLED(CONFIG_DRM_MSM) || IS_ENABLED(CONFIG_DRM_OPLUS_NOTIFY) || IS_ENABLED(CONFIG_DRM)
 #include <linux/msm_drm_notify.h>
 #include <drm/drm_notifier_mi.h>	/* pipa: Xiaomi panel blank events */
 #endif
@@ -92,7 +92,7 @@ static struct zram *swapd_zram = NULL;
 static u64 max_reclaimin_size = MAX_RECLAIMIN_SZ;
 atomic_long_t page_fault_pause = ATOMIC_LONG_INIT(0);
 atomic_long_t page_fault_pause_cnt = ATOMIC_LONG_INIT(0);
-#if IS_ENABLED(CONFIG_DRM_MSM) || IS_ENABLED(CONFIG_DRM_OPLUS_NOTIFY)
+#if IS_ENABLED(CONFIG_DRM_MSM) || IS_ENABLED(CONFIG_DRM_OPLUS_NOTIFY) || IS_ENABLED(CONFIG_DRM)
 static struct notifier_block fb_notif;
 static atomic_t display_off = ATOMIC_LONG_INIT(0);
 #endif
@@ -1302,7 +1302,7 @@ static void wakeup_swapd(pg_data_t *pgdat)
 		return;
 	}
 
-#if IS_ENABLED(CONFIG_DRM_MSM) || IS_ENABLED(CONFIG_DRM_OPLUS_NOTIFY)
+#if IS_ENABLED(CONFIG_DRM_MSM) || IS_ENABLED(CONFIG_DRM_OPLUS_NOTIFY) || IS_ENABLED(CONFIG_DRM)
 	if (atomic_read(&display_off))
 		return;
 #endif
@@ -1486,7 +1486,7 @@ static void swapd_shrink_node(pg_data_t *pgdat)
 	unsigned int before_avail = system_cur_usable_mem();
 	unsigned int after_avail;
 
-#if IS_ENABLED(CONFIG_DRM_MSM) || IS_ENABLED(CONFIG_DRM_OPLUS_NOTIFY)
+#if IS_ENABLED(CONFIG_DRM_MSM) || IS_ENABLED(CONFIG_DRM_OPLUS_NOTIFY) || IS_ENABLED(CONFIG_DRM)
 	if (atomic_read(&display_off))
 		return;
 #endif
@@ -1584,7 +1584,7 @@ static int swapd(void *p)
 		last_swapd_time = jiffies;
 do_eswap:
 		page_fault_pause_value = atomic_long_read(&page_fault_pause);
-#if IS_ENABLED(CONFIG_DRM_MSM) || IS_ENABLED(CONFIG_DRM_OPLUS_NOTIFY)
+#if IS_ENABLED(CONFIG_DRM_MSM) || IS_ENABLED(CONFIG_DRM_OPLUS_NOTIFY) || IS_ENABLED(CONFIG_DRM)
 		display_un_blank = !atomic_read(&display_off);
 #endif
 		if (!hybridswap_reclaim_work_running() && display_un_blank &&
@@ -1816,7 +1816,7 @@ ssize_t hybridswap_swapd_pause_show(struct device *dev,
 	return size;
 }
 
-#if IS_ENABLED(CONFIG_DRM_MSM) || IS_ENABLED(CONFIG_DRM_OPLUS_NOTIFY)
+#if IS_ENABLED(CONFIG_DRM_MSM) || IS_ENABLED(CONFIG_DRM_OPLUS_NOTIFY) || IS_ENABLED(CONFIG_DRM)
 static int bright_fb_notifier_callback(struct notifier_block *self,
 		unsigned long event, void *data)
 {
@@ -1861,7 +1861,7 @@ int swapd_init(struct zram *zram)
 		return ret;
 	}
 
-#if IS_ENABLED(CONFIG_DRM_MSM) || IS_ENABLED(CONFIG_DRM_OPLUS_NOTIFY)
+#if IS_ENABLED(CONFIG_DRM_MSM) || IS_ENABLED(CONFIG_DRM_OPLUS_NOTIFY) || IS_ENABLED(CONFIG_DRM)
 	fb_notif.notifier_call = bright_fb_notifier_callback;
 	ret = mi_drm_register_client(&fb_notif);
 	if (ret) {
@@ -1889,7 +1889,7 @@ int swapd_init(struct zram *zram)
 create_swapd_fail:
 	refresh_daemonexit();
 refresh_daemonfail:
-#if IS_ENABLED(CONFIG_DRM_MSM) || IS_ENABLED(CONFIG_DRM_OPLUS_NOTIFY)
+#if IS_ENABLED(CONFIG_DRM_MSM) || IS_ENABLED(CONFIG_DRM_OPLUS_NOTIFY) || IS_ENABLED(CONFIG_DRM)
 	mi_drm_unregister_client(&fb_notif);
 msm_drm_register_fail:
 #endif
@@ -1901,7 +1901,7 @@ void swapd_exit(void)
 {
 	destroy_swapd_thread();
 	refresh_daemonexit();
-#if IS_ENABLED(CONFIG_DRM_MSM) || IS_ENABLED(CONFIG_DRM_OPLUS_NOTIFY)
+#if IS_ENABLED(CONFIG_DRM_MSM) || IS_ENABLED(CONFIG_DRM_OPLUS_NOTIFY) || IS_ENABLED(CONFIG_DRM)
 	mi_drm_unregister_client(&fb_notif);
 #endif
 	unregister_memory_notifier(&swapd_notifier_nb);
