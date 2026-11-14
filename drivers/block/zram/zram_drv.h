@@ -54,6 +54,16 @@ enum zram_pageflags {
 	ZRAM_COMPRESS_LOW, /*lower than aim compaction ratio */
 	ZRAM_IDLE,	/* not accessed page since last idle marking */
 	ZRAM_IMPORTANT,	/* the important page */
+#ifdef CONFIG_HYBRIDSWAP_ASYNC_COMPRESS
+	ZRAM_CACHED,   /* page is cached in async compress cache buffer */
+	ZRAM_CACHED_COMPRESS, /* page is under async compress */
+#endif
+#ifdef CONFIG_HYBRIDSWAP_CORE
+	ZRAM_BATCHING_OUT,
+	ZRAM_FROM_HYBRIDSWAP,
+	ZRAM_MCGID_CLEAR,
+	ZRAM_IN_BD, /* zram stored in back device */
+#endif
 
 	__NR_ZRAM_PAGEFLAGS,
 };
@@ -82,6 +92,9 @@ struct zram_table_entry {
 	union {
 		struct zram_entry *entry;
 		unsigned long element;
+#ifdef CONFIG_HYBRIDSWAP_ASYNC_COMPRESS
+		unsigned long page;
+#endif
 	};
 	unsigned long flags;
 #if defined(CONFIG_ZRAM_MEMORY_TRACKING) || defined(CONFIG_MIUI_ZRAM_MEMORY_TRACKING)
@@ -169,10 +182,7 @@ struct zram {
 	spinlock_t wb_limit_lock;
 	bool wb_limit_enable;
 	u64 bd_wb_limit;
-	struct block_device *bdev;
-	unsigned int old_block_size;
 	unsigned long *bitmap;
-	unsigned long nr_pages;
 #endif
 #ifdef CONFIG_ZRAM_MEMORY_TRACKING
 	struct dentry *debugfs_dir;
@@ -182,6 +192,15 @@ struct zram {
 	ktime_t first_time;
 	ktime_t last_time;
 	atomic64_t avg_size;
+#endif
+#if (defined CONFIG_ZRAM_WRITEBACK) || (defined CONFIG_HYBRIDSWAP_CORE)
+	struct block_device *bdev;
+	unsigned int old_block_size;
+	unsigned long nr_pages;
+	unsigned long increase_nr_pages;
+#endif
+#ifdef CONFIG_HYBRIDSWAP_CORE
+	struct hyb_info *infos;
 #endif
 };
 

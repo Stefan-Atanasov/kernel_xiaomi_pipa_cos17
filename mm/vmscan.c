@@ -66,6 +66,7 @@
 
 #define CREATE_TRACE_POINTS
 #include <trace/events/vmscan.h>
+#include <trace/hooks/vh_vmscan.h>
 
 struct scan_control {
 	/* How many pages shrink_list() should reclaim */
@@ -190,6 +191,9 @@ int vm_swappiness = 60;
  */
 int direct_vm_swappiness = 60;
 #endif /*OPLUS_FEATURE_ZRAM_OPT*/
+#ifdef CONFIG_HYBRIDSWAP_SWAPD
+static int hybridswapd_swappiness = 200;
+#endif
 /*
  * The total number of pages which are beyond the high watermark within all
  * zones.
@@ -2363,6 +2367,14 @@ enum scan_balance {
 	SCAN_FILE,
 };
 
+#ifdef CONFIG_HYBRIDSWAP_SWAPD
+extern bool free_swap_is_low(void);
+bool __weak free_swap_is_low(void)
+{
+	return false;
+}
+#endif
+
 /*
  * Determine how aggressively the anon and file LRU lists should be
  * scanned.  The relative value of each set of LRU lists is determined
@@ -2391,8 +2403,16 @@ static void get_scan_count(struct lruvec *lruvec, struct mem_cgroup *memcg,
 
 	/* use vm_swappiness defaultly */
 	swappiness = vm_swappiness;
-	if (!current_is_kswapd())
-		swappiness = direct_vm_swappiness;
+	if (!current_is_kswapd()) {
+#ifdef CONFIG_HYBRIDSWAP_SWAPD
+		if (strncmp(current->comm, "hybridswapd:", sizeof("hybridswapd:") - 1) == 0) {
+			swappiness = hybridswapd_swappiness;
+			if (free_swap_is_low())
+				swappiness = 0;
+		} else
+#endif
+			swappiness = direct_vm_swappiness;
+	}
 	if (!sc->may_swap || (mem_cgroup_get_nr_swap_pages(memcg) <= totalswap>>6)) {
 #else
 
@@ -2551,6 +2571,7 @@ out:
 		if (!scan && !mem_cgroup_online(memcg))
 			scan = min(size, SWAP_CLUSTER_MAX);
 
+		trace_android_vh_tune_scan_type((char *)(&scan_balance));
 		switch (scan_balance) {
 		case SCAN_EQUAL:
 			/* Scan lists relative to size */
@@ -4619,6 +4640,13 @@ static ssize_t swappiness_para_write(struct file *file,
 		return len;
 	}
 
+#ifdef CONFIG_HYBRIDSWAP_SWAPD
+	if (!debug_get_val(str, "swapd_swappiness=", &val)) {
+		hybridswapd_swappiness = val;
+		return len;
+	}
+#endif
+
 	return -EINVAL;
 }
 
@@ -4631,6 +4659,10 @@ static ssize_t swappiness_para_read(struct file *file,
 	len = snprintf(kbuf, PARA_BUF_LEN, "vm_swappiness: %d\n", vm_swappiness);
 	len += snprintf(kbuf + len, PARA_BUF_LEN - len,
 			"direct_swappiness: %d\n", direct_vm_swappiness);
+#ifdef CONFIG_HYBRIDSWAP_SWAPD
+	len += snprintf(kbuf + len, PARA_BUF_LEN - len,
+			"swapd_swappiness: %d\n", hybridswapd_swappiness);
+#endif
 
 	if (len == PARA_BUF_LEN)
 		kbuf[len - 1] = '\0';
