@@ -1,6 +1,6 @@
 # Kernel for the ColorOS 17 port on Xiaomi Pad 6 (pipa)
 
-Kernel `walt-r17` (Linux 4.19.325) for the ColorOS 17 port on the Xiaomi Pad 6 (`pipa`, SM8250 / SD870). `walt-r6` is
+Kernel `walt-r26` (Linux 4.19.325) for the ColorOS 17 port on the Xiaomi Pad 6 (`pipa`, SM8250 / SD870). `walt-r6` is
 the beta5 release. r7: keypad input devices only while the keypad is attached (nanosic), no NV MAC wait for Wi-Fi
 (cnss2), `ovnet` virtual netdev for OPPO interconnect network sharing. r8: SukiSU-Ultra builtin `85d3b048` (v4.3.0
 level, manager 41100) with 4.19 compat, susfs priority-uid-filter backport. r8kpm: r8 + KPM (KernelPatch 0.14.0,
@@ -16,6 +16,14 @@ r14: DisplayPort (USB-C monitor) at most 8 bpc by default: a GO27Q24 dropped the
 r15: the DP preferred mode is the highest refresh rate at the monitor's preferred resolution that fits the trained link (SurfaceFlinger keeps an external display at its first mode, e.g. 2560x1440@120 instead of @60); `pipa_dp_prefer_max_rate`, off until reboot after two quick HPD drops.
 r16: `/proc/shell-temp` for ColorOS `horae` (port of OPPO `horae_shell_temp`: horae writes "<index> <m°C>", a read returns the highest value; no thermal zone on pipa, so the Xiaomi/Qualcomm thermal handling is unchanged).
 r17: SukiSU-Ultra builtin `1cfa5734` (v4.3.0-r1 level, kernel version 41140, uapi 6; the v4.3.0-r1 manager and its ksud match). susfs stays v2.3.0. beta7 ships r17.
+r18-r22: NT36532 touch fixes (lock for the pen and USB commands; resume always enables the IRQ and the active pin
+state; a failed resume firmware download is retried after the panel is on; full panel power cycle if the firmware stays
+dead), nanosic keyboard cover fixes (fold request of xiaomi-keyboard, `/proc/nanokbd`; screen-off key cache drained in
+process context). r23: OPPO memory path from the stock OPPO Pad 1 kernel (same SoC): `OPLUS_ZRAM_OPT` (swappiness up to
+200, `direct_swappiness`, `/proc/oplus_healthinfo/swappiness_para`), `OPLUS_MULTI_KSWAPD`, `KSWAPD_UNBIND_MAX_CPU`.
+r24: OPPO hybridswap (`HYBRIDSWAP`, `_SWAPD`, `_CORE`: memcg-aware zram, `hybridswapd`, eswap to a loop file on
+/data = ColorOS RAM expansion; 7 Android vendor hooks, `android_oem_data1` in memcg and pgdat; `ZRAM_WRITEBACK` off as
+on stock). r26: hybridswapd stays idle while the panel is off, as on stock (pipa sends panel events through `mi_drm`).
 Branch `oppo` is what the port ships; branch `own` is the same kernel without OPPO's UI First scheduler code.
 
 ## What it is made of
