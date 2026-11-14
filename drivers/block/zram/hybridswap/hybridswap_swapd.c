@@ -17,6 +17,7 @@
 #include <linux/cpumask.h>
 #if IS_ENABLED(CONFIG_DRM_MSM) || IS_ENABLED(CONFIG_DRM_OPLUS_NOTIFY)
 #include <linux/msm_drm_notify.h>
+#include <drm/drm_notifier_mi.h>	/* pipa: Xiaomi panel blank events */
 #endif
 
 #include "../zram_drv.h"
@@ -1819,15 +1820,20 @@ ssize_t hybridswap_swapd_pause_show(struct device *dev,
 static int bright_fb_notifier_callback(struct notifier_block *self,
 		unsigned long event, void *data)
 {
-	struct msm_drm_notifier *evdata = data;
+	/*
+	 * pipa: msm_drm_register_client() is a stub on this kernel (never notifies); the Xiaomi display stack sends
+	 * panel blank events through mi_drm (as the touch driver uses). Same meaning as stock: swapd stays idle while
+	 * the panel is powered down.
+	 */
+	struct mi_drm_notifier *evdata = data;
 	int *blank;
 
-	if (evdata && evdata->data) {
+	if (event == MI_DRM_EVENT_BLANK && evdata && evdata->data) {
 		blank = evdata->data;
 
-		if (*blank ==  MSM_DRM_BLANK_POWERDOWN)
+		if (*blank == MI_DRM_BLANK_POWERDOWN)
 			atomic_set(&display_off, 1);
-		else if (*blank == MSM_DRM_BLANK_UNBLANK)
+		else if (*blank == MI_DRM_BLANK_UNBLANK)
 			atomic_set(&display_off, 0);
 	}
 
@@ -1857,7 +1863,7 @@ int swapd_init(struct zram *zram)
 
 #if IS_ENABLED(CONFIG_DRM_MSM) || IS_ENABLED(CONFIG_DRM_OPLUS_NOTIFY)
 	fb_notif.notifier_call = bright_fb_notifier_callback;
-	ret = msm_drm_register_client(&fb_notif);
+	ret = mi_drm_register_client(&fb_notif);
 	if (ret) {
 		hybp(HYB_ERR, "msm_drm_register_client failed, ret=%d\n", ret);
 		goto msm_drm_register_fail;
@@ -1884,7 +1890,7 @@ create_swapd_fail:
 	refresh_daemonexit();
 refresh_daemonfail:
 #if IS_ENABLED(CONFIG_DRM_MSM) || IS_ENABLED(CONFIG_DRM_OPLUS_NOTIFY)
-	msm_drm_unregister_client(&fb_notif);
+	mi_drm_unregister_client(&fb_notif);
 msm_drm_register_fail:
 #endif
 	unregister_memory_notifier(&swapd_notifier_nb);
@@ -1896,7 +1902,7 @@ void swapd_exit(void)
 	destroy_swapd_thread();
 	refresh_daemonexit();
 #if IS_ENABLED(CONFIG_DRM_MSM) || IS_ENABLED(CONFIG_DRM_OPLUS_NOTIFY)
-	msm_drm_unregister_client(&fb_notif);
+	mi_drm_unregister_client(&fb_notif);
 #endif
 	unregister_memory_notifier(&swapd_notifier_nb);
 	atomic_set(&swapd_enabled, 0);
