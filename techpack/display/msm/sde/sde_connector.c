@@ -3074,6 +3074,48 @@ static irqreturn_t esd_err_irq_handle(int irq, void *data)
 	return IRQ_HANDLED;
 }
 
+/* BUGS 84: primary DSI connector, so the touch driver can ask for a full panel power cycle. */
+static struct sde_connector *mi_touch_recovery_conn;
+
+/*
+ * Touch (NT36532 TDDI) firmware download failed and the touch-only resets did not help: report PANEL_DEAD
+ * like the panel ESD error pin does. The composer then powers the panel off and on; panel_dead_flag makes
+ * that a full rail + reset cycle even in double-tap mode. Same steps as esd_err_irq_handle(), no pin check.
+ */
+int mi_disp_touch_request_recovery(void)
+{
+	struct sde_connector *c_conn = mi_touch_recovery_conn;
+	struct dsi_display *display;
+	int power_mode;
+
+	if (!c_conn || !c_conn->display)
+		return -ENODEV;
+	display = c_conn->display;
+	if (!display->panel)
+		return -ENODEV;
+
+	dsi_panel_acquire_panel_lock(display->panel);
+	if (!dsi_panel_initialized(display->panel) ||
+	    atomic_read(&display->panel->esd_recovery_pending) ||
+	    c_conn->panel_dead) {
+		dsi_panel_release_panel_lock(display->panel);
+		return -EBUSY;
+	}
+	power_mode = display->panel->power_mode;
+	if (power_mode != SDE_MODE_DPMS_ON) {
+		dsi_panel_release_panel_lock(display->panel);
+		return -EAGAIN;
+	}
+	dsi_panel_esd_irq_ctrl_locked(display->panel, false);
+	atomic_set(&display->panel->esd_recovery_pending, 1);
+	dsi_panel_release_panel_lock(display->panel);
+
+	SDE_ERROR("touch firmware dead: report PANEL_DEAD for a full panel power cycle\n");
+	_sde_connector_report_panel_dead(c_conn, false);
+	return 0;
+}
+EXPORT_SYMBOL(mi_disp_touch_request_recovery);
+
 static int sde_connector_register_esd_irq(struct sde_connector *c_conn)
 {
 	struct dsi_display *display = c_conn->display;
@@ -3086,6 +3128,8 @@ static int sde_connector_register_esd_irq(struct sde_connector *c_conn)
 			SDE_ERROR("invalid display/panel\n");
 			return -EINVAL;
 		}
+		if (!mi_touch_recovery_conn)	/* pipa: one (dual-DSI) panel */
+			mi_touch_recovery_conn = c_conn;
 		if((display->panel->mi_cfg.panel_id == 0x4D38324100360200) || (display->panel->mi_cfg.panel_id == 0x4D38324100420200))
 		{
 			if ((display->panel->mi_cfg.esd_err_irq_gpio > 0) && (display->panel->mi_cfg.esd_err_irq_gpio_sec > 0)) {

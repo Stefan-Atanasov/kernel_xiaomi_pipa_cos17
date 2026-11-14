@@ -2943,6 +2943,19 @@ static const struct file_operations tpdbg_ops = {
 #if defined(CONFIG_DRM_PANEL)
 #define NVT_FW_RETRY_DELAY_MS 500
 #define NVT_FW_RETRY_MAX 3
+#define NVT_FW_ESCALATE_MAX 2
+
+/* r22: after NVT_FW_RETRY_MAX failed SPI recoveries, ask the display for a full panel power cycle (TDDI:
+ * the display owns the rails and the reset pin). At most NVT_FW_ESCALATE_MAX in a row without a good download.
+ */
+extern int mi_disp_touch_request_recovery(void);
+static unsigned int nvt_fw_escalations;
+/* Test switch (root): N > 0 = the next N resume cycles report a failed download (resume + every retry), so
+ * the retry and escalation path can be tested. /sys/module/nt36xxx/parameters/fw_fail_test
+ */
+static int nvt_fw_fail_test;
+module_param_named(fw_fail_test, nvt_fw_fail_test, int, 0600);
+static bool nvt_fw_fake_fail;
 
 /* Failure-only recovery. The display driver owns the physical reset/rails. */
 static void nvt_fw_retry_work(struct work_struct *work)
@@ -2950,6 +2963,7 @@ static void nvt_fw_retry_work(struct work_struct *work)
 	struct nvt_ts_data *ts = container_of(to_delayed_work(work),
 					    struct nvt_ts_data, fw_retry_work);
 	struct device *dev = &ts->client->dev;
+	bool escalate = false;
 	int ret;
 
 	pm_stay_awake(dev);
@@ -2982,6 +2996,8 @@ static void nvt_fw_retry_work(struct work_struct *work)
 	}
 	if (!ret)
 		ret = nvt_check_fw_reset_state(RESET_STATE_REK);
+	if (nvt_fw_fake_fail)
+		ret = -EIO;
 result:
 	if (ret) {
 		NVT_ERR("r21: FW retry %u/%u failed (%d)%s\n",
@@ -2992,7 +3008,12 @@ result:
 		    READ_ONCE(ts->panel_unblank))
 			queue_delayed_work(system_freezable_wq, &ts->fw_retry_work,
 					   msecs_to_jiffies(NVT_FW_RETRY_DELAY_MS));
+		else if (ts->fw_retry_count == NVT_FW_RETRY_MAX &&
+			 READ_ONCE(ts->panel_unblank) &&
+			 nvt_fw_escalations < NVT_FW_ESCALATE_MAX)
+			escalate = true;
 	} else {
+		nvt_fw_escalations = 0;
 		NVT_LOG("r21: FW retry %u/%u recovered\n",
 			ts->fw_retry_count, NVT_FW_RETRY_MAX);
 #ifdef CONFIG_TOUCHSCREEN_XIAOMI_TOUCHFEATURE
@@ -3006,6 +3027,13 @@ result:
 	}
 out:
 	mutex_unlock(&ts->lock);
+	/* Not under ts->lock: the panel power cycle runs the touch suspend/resume (they take it). */
+	if (escalate) {
+		nvt_fw_escalations++;
+		ret = mi_disp_touch_request_recovery();
+		NVT_ERR("r22: full panel power cycle %u/%u requested (%d)\n",
+			nvt_fw_escalations, NVT_FW_ESCALATE_MAX, ret);
+	}
 	pm_relax(dev);
 }
 #endif
@@ -4016,6 +4044,14 @@ static int32_t nvt_ts_resume(struct device *dev)
 			nvt_check_fw_reset_state(RESET_STATE_REK);
 	}
 #if defined(CONFIG_DRM_PANEL)
+	nvt_fw_fake_fail = nvt_fw_fail_test > 0;
+	if (nvt_fw_fake_fail) {
+		nvt_fw_fail_test--;
+		NVT_ERR("r22: fw_fail_test: this resume reports a failed download\n");
+		ret = -EIO;
+	}
+	if (!ret)
+		nvt_fw_escalations = 0;
 	ts->fw_retry_count = 0;
 	if (ret && READ_ONCE(ts->panel_unblank)) {
 		NVT_ERR("r21: resume FW failed (%d), retry in %u ms\n",
