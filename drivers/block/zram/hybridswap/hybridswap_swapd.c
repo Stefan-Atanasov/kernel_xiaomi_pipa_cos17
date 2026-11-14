@@ -16,7 +16,6 @@
 #include <linux/cpuhotplug.h>
 #include <linux/cpumask.h>
 #if IS_ENABLED(CONFIG_DRM_MSM) || IS_ENABLED(CONFIG_DRM_OPLUS_NOTIFY) || IS_ENABLED(CONFIG_DRM)
-#include <linux/msm_drm_notify.h>
 #include <drm/drm_notifier_mi.h>	/* pipa: Xiaomi panel blank events */
 #endif
 
