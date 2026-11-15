@@ -4703,8 +4703,10 @@ EXPORT_SYMBOL(create_swappiness_para_proc);
 /* we have no oplus_healthinfo driver: make its proc dir ourselves if nobody did */
 static int __init oplus_swappiness_para_init(void)
 {
+#ifndef CONFIG_OPLUS_HEALTHINFO_LITE	/* that driver (fs_initcall) already made the dir */
 	if (!proc_mkdir("oplus_healthinfo", NULL))
 		pr_warn("oplus_healthinfo proc dir not created\n");
+#endif
 	return create_swappiness_para_proc();
 }
 late_initcall(oplus_swappiness_para_init);
