@@ -109,18 +109,21 @@ static const struct file_operations cpu_loading_fops = {
 	.release	= single_release,
 };
 
-/* ---- kswapd_loading: busiest kswapd, percent of one CPU over the sample window ---- */
+/* ---- kswapd_loading: all kswapd threads, percent of one CPU over the sample window ---- */
 
 static u64 ohm_kswapd_runtime(void)
 {
 	u64 sum = 0;
-	int nid;
+	int nid, i;
 
 	for_each_online_node(nid) {
-		struct task_struct *t = READ_ONCE(NODE_DATA(nid)->kswapd);
+		/* this tree (QCOM) has up to MAX_KSWAPD_THREADS kswapd tasks per node */
+		for (i = 0; i < MAX_KSWAPD_THREADS; i++) {
+			struct task_struct *t = READ_ONCE(NODE_DATA(nid)->kswapd[i]);
 
-		if (t)
-			sum += t->se.sum_exec_runtime;
+			if (t)
+				sum += t->se.sum_exec_runtime;
+		}
 	}
 	return sum;
 }
@@ -137,7 +140,7 @@ static int kswapd_loading_show(struct seq_file *m, void *v)
 	t1 = ktime_get();
 
 	win = ktime_to_ns(ktime_sub(t1, t0));
-	/* all nodes summed: one node on this SoC, so this is kswapd0 */
+	/* all kswapd threads summed, percent of one CPU; one node on this SoC */
 	seq_printf(m, "kswapd_loading: %d\n",
 		   (b > a && win) ? (int)min_t(u64, 100, div64_u64(100 * (b - a), win)) : 0);
 	return 0;
