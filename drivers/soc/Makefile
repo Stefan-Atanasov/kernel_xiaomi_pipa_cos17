@@ -16,6 +16,7 @@ obj-y				+= mediatek/
 obj-y				+= amlogic/
 obj-y				+= qcom/
 obj-$(CONFIG_OPLUS_FEATURE_IM)	+= oplus/im/
+obj-$(CONFIG_OPLUS_HEALTHINFO_LITE)	+= oplus/healthinfo/
 obj-y				+= renesas/
 obj-$(CONFIG_ARCH_ROCKCHIP)	+= rockchip/
 obj-$(CONFIG_SOC_SAMSUNG)	+= samsung/

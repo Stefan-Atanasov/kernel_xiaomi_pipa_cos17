@@ -1,0 +1,10 @@
+config OPLUS_HEALTHINFO_LITE
+	bool "OPLUS healthinfo, read-only stats nodes for the OPPO perf HAL"
+	depends on PROC_FS
+	default y
+	help
+	  Creates /proc/oplus_healthinfo/{cpu_loading,kswapd_loading} and
+	  /proc/fg_info/fg_uids, the nodes the stock OPPO performance HAL and
+	  system_server read. The values come from kcpustat and the kswapd
+	  threads on read, so there are no scheduler, mm or block hooks and
+	  no behaviour change outside these proc files.
