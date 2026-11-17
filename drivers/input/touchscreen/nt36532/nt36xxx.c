@@ -2388,6 +2388,10 @@ static int nvt_touchfeature_set(uint8_t *touchfeature)
 	if (mutex_lock_interruptible(&ts->lock)) {
 		return -ERESTARTSYS;
 	}
+	if (!bTouchIsAwake) {	/* pipa: suspended, resume sends it (BUGS 128) */
+		mutex_unlock(&ts->lock);
+		return -EAGAIN;
+	}
 
 #if NVT_TOUCH_ESD_PROTECT
 	nvt_esd_check_enable(false);
@@ -2408,7 +2412,7 @@ static int nvt_touchfeature_set(uint8_t *touchfeature)
 #define PANEL_ORIENTATION_DEGREE_270	3	/* anticlockwise 270 degrees */
 
 static void update_touchfeature_value_work(struct work_struct *work) {
-	uint8_t ret = 0;
+	int ret = 0;
 	uint8_t i = 0;
 	uint8_t nvt_game_value[2] = {0};
 	int size = 6;
@@ -2497,7 +2501,7 @@ static void nvt_set_gesture_mode(void)
 
 static int nvt_set_cur_value(int nvt_mode, int nvt_value)
 {
-	if (nvt_mode >= Touch_Mode_NUM && nvt_mode < 0) {
+	if (nvt_mode >= Touch_Mode_NUM || nvt_mode < 0) {
 		NVT_ERR("%s, nvt mode is error:%d", __func__, nvt_mode);
 		return -EINVAL;
 	}
@@ -2581,47 +2585,37 @@ static int nvt_get_mode_all(int mode, int *value)
 	return 0;
 }
 
-static void nvt_game_mode_recovery(void)
+/* pipa (BUGS 128): after every firmware download (resume, r21 retry, watchdog
+ * recovery) the IC runs the probe state again. The worker only sends a mode
+ * whose cached value differs from the set value, so put the cached values of
+ * all modes the worker sends back to the probe state: changed values are sent
+ * again, unchanged ones are not (same IC state as a cold boot). The IC is out
+ * of game mode now, so game_mode_enable follows; the worker sets it again
+ * when it sends game mode (and switches the pen input).
+ */
+static void nvt_touchmode_after_download(void)
 {
-	/* pipa: every resume downloads the firmware again, so the IC runs the
-	 * same state as after the probe download. The worker only writes modes
-	 * whose cached value differs from the set value, so game mode and the
-	 * touch feature levels set by OPPO Game Space (Ultra touch, click/aim
-	 * sensitivity, smoothness, edge) were lost after a screen off/on, and
-	 * game_mode_enable kept the pen disabled. Put the cached values back to
-	 * the probe state: every value that differs from it is sent again, and
-	 * values never changed are not sent (same IC state as a cold boot).
-	 */
-	static const enum MODE_TYPE resent[] = {Touch_Game_Mode, Touch_UP_THRESHOLD,
+	static const enum MODE_TYPE sent[] = {Touch_Game_Mode, Touch_UP_THRESHOLD,
 		Touch_Tolerance, Touch_Tap_Stability, Touch_Aim_Sensitivity,
-		Touch_Edge_Filter};
+		Touch_Edge_Filter, Touch_Panel_Orientation, Touch_Resist_RF};
 	int i;
 
-	for (i = 0; i < ARRAY_SIZE(resent); i++)
-		xiaomi_touch_interfaces.touch_mode[resent[i]][GET_CUR_VALUE] =
-			nvt_probe_touchmode[resent[i]];
-	xiaomi_touch_interfaces.touch_mode[Touch_Panel_Orientation][GET_CUR_VALUE] =
-		xiaomi_touch_interfaces.touch_mode[Touch_Panel_Orientation][GET_DEF_VALUE];
+	for (i = 0; i < ARRAY_SIZE(sent); i++)
+		xiaomi_touch_interfaces.touch_mode[sent[i]][GET_CUR_VALUE] =
+			nvt_probe_touchmode[sent[i]];
+	ts->game_mode_enable = nvt_probe_touchmode[Touch_Game_Mode];
+}
 
+static void nvt_game_mode_recovery(void)
+{
+	nvt_touchmode_after_download();
 	queue_work(ts->set_touchfeature_wq, &ts->set_touchfeature_work);
 }
 
 static void nvt_all_para_recovery(void)
 {
-	int i = 0;
 	NVT_LOG("nvt_all_para_recovery enter,ts->game_mode_enable = %d\n",ts->game_mode_enable);
-	if(ts->game_mode_enable == 1)
-	{
-		for (i = 0; i < Touch_Mode_NUM; i++) {
-			xiaomi_touch_interfaces.touch_mode[i][GET_CUR_VALUE] =
-				xiaomi_touch_interfaces.touch_mode[i][GET_DEF_VALUE];
-		}
-	} else {
-		xiaomi_touch_interfaces.touch_mode[Touch_Panel_Orientation][GET_CUR_VALUE] =
-			xiaomi_touch_interfaces.touch_mode[Touch_Panel_Orientation][GET_DEF_VALUE];
-		xiaomi_touch_interfaces.touch_mode[Touch_Resist_RF][GET_CUR_VALUE] =
-			xiaomi_touch_interfaces.touch_mode[Touch_Resist_RF][GET_DEF_VALUE];
-	}
+	nvt_touchmode_after_download();
 
 	ts->is_usb_exist = -1;
 	queue_work(ts->event_wq, &ts->power_supply_work);
