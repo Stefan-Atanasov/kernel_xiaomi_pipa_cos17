@@ -2252,6 +2252,9 @@ static int nvt_ts_check_dt(struct device_node *np)
 #ifdef CONFIG_TOUCHSCREEN_XIAOMI_TOUCHFEATURE
 static struct xiaomi_touch_interface xiaomi_touch_interfaces;
 
+/* IC state of each touch mode after a firmware download (pipa, BUGS 128) */
+static int nvt_probe_touchmode[Touch_Mode_NUM];
+
 static void nvt_init_touchmode_data(void)
 {
 	int i;
@@ -2332,6 +2335,10 @@ static void nvt_init_touchmode_data(void)
 	xiaomi_touch_interfaces.touch_mode[Touch_Pen_ENABLE][GET_DEF_VALUE] = 0;
 	xiaomi_touch_interfaces.touch_mode[Touch_Pen_ENABLE][SET_CUR_VALUE] = 0;
 	xiaomi_touch_interfaces.touch_mode[Touch_Pen_ENABLE][GET_CUR_VALUE] = 0;
+
+	for (i = 0; i < Touch_Mode_NUM; i++)
+		nvt_probe_touchmode[i] =
+			xiaomi_touch_interfaces.touch_mode[i][GET_CUR_VALUE];
 
 	for (i = 0; i < Touch_Mode_NUM; i++) {
 		NVT_LOG("mode:%d, set cur:%d, get cur:%d, def:%d min:%d max:%d\n",
@@ -2576,12 +2583,14 @@ static int nvt_get_mode_all(int mode, int *value)
 
 static void nvt_game_mode_recovery(void)
 {
-	/* pipa: every resume downloads the firmware again, so the IC runs its
-	 * defaults. The worker only writes modes whose cached value differs from
-	 * the set value, so game mode and the touch feature levels set by OPPO
-	 * Game Space (Ultra touch, click/aim sensitivity, smoothness, edge) were
-	 * lost after a screen off/on, and game_mode_enable kept the pen disabled.
-	 * Mark them as "IC at default" so every non-default value is sent again.
+	/* pipa: every resume downloads the firmware again, so the IC runs the
+	 * same state as after the probe download. The worker only writes modes
+	 * whose cached value differs from the set value, so game mode and the
+	 * touch feature levels set by OPPO Game Space (Ultra touch, click/aim
+	 * sensitivity, smoothness, edge) were lost after a screen off/on, and
+	 * game_mode_enable kept the pen disabled. Put the cached values back to
+	 * the probe state: every value that differs from it is sent again, and
+	 * values never changed are not sent (same IC state as a cold boot).
 	 */
 	static const enum MODE_TYPE resent[] = {Touch_Game_Mode, Touch_UP_THRESHOLD,
 		Touch_Tolerance, Touch_Tap_Stability, Touch_Aim_Sensitivity,
@@ -2590,7 +2599,7 @@ static void nvt_game_mode_recovery(void)
 
 	for (i = 0; i < ARRAY_SIZE(resent); i++)
 		xiaomi_touch_interfaces.touch_mode[resent[i]][GET_CUR_VALUE] =
-			xiaomi_touch_interfaces.touch_mode[resent[i]][GET_DEF_VALUE];
+			nvt_probe_touchmode[resent[i]];
 	xiaomi_touch_interfaces.touch_mode[Touch_Panel_Orientation][GET_CUR_VALUE] =
 		xiaomi_touch_interfaces.touch_mode[Touch_Panel_Orientation][GET_DEF_VALUE];
 
