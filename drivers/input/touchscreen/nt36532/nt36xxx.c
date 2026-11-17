@@ -2576,6 +2576,21 @@ static int nvt_get_mode_all(int mode, int *value)
 
 static void nvt_game_mode_recovery(void)
 {
+	/* pipa: every resume downloads the firmware again, so the IC runs its
+	 * defaults. The worker only writes modes whose cached value differs from
+	 * the set value, so game mode and the touch feature levels set by OPPO
+	 * Game Space (Ultra touch, click/aim sensitivity, smoothness, edge) were
+	 * lost after a screen off/on, and game_mode_enable kept the pen disabled.
+	 * Mark them as "IC at default" so every non-default value is sent again.
+	 */
+	static const enum MODE_TYPE resent[] = {Touch_Game_Mode, Touch_UP_THRESHOLD,
+		Touch_Tolerance, Touch_Tap_Stability, Touch_Aim_Sensitivity,
+		Touch_Edge_Filter};
+	int i;
+
+	for (i = 0; i < ARRAY_SIZE(resent); i++)
+		xiaomi_touch_interfaces.touch_mode[resent[i]][GET_CUR_VALUE] =
+			xiaomi_touch_interfaces.touch_mode[resent[i]][GET_DEF_VALUE];
 	xiaomi_touch_interfaces.touch_mode[Touch_Panel_Orientation][GET_CUR_VALUE] =
 		xiaomi_touch_interfaces.touch_mode[Touch_Panel_Orientation][GET_DEF_VALUE];
 
