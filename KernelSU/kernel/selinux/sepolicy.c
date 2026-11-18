@@ -1,4 +1,4 @@
-#ifdef CONFIG_KSU_SUSFS
+#ifdef CONFIG_KSU_SUSFS_SUS_AVD /* pipa: susfs 2.3.0 has no SUS AVD/type hiding (susfs 2.4) */
 extern int susfs_add_sus_avd_allowed_by_type(u32 s_type, u32 t_type, u16 type, u32 orig_avd_allowed);
 extern int susfs_add_sus_type(const char *secctx, u32 type_value);
 #endif // #ifdef CONFIG_KSU_SUSFS
@@ -330,7 +330,7 @@ static bool add_rule_raw(struct policydb *db, struct type_datum *src, struct typ
                 return false;
         }
 
-#ifdef CONFIG_KSU_SUSFS
+#ifdef CONFIG_KSU_SUSFS_SUS_AVD /* pipa: susfs 2.3.0 */
         susfs_add_sus_avd_allowed_by_type(src->value, tgt->value, cls->value, node->datum.u.data);
 #endif // #ifdef CONFIG_KSU_SUSFS
 
@@ -757,7 +757,7 @@ static bool add_type(struct policydb *db, const char *type_name, bool attr)
         ebitmap_set_bit(&db->role_val_to_struct[i]->types, value - 1, 1);
     }
 
-#ifdef CONFIG_KSU_SUSFS
+#ifdef CONFIG_KSU_SUSFS_SUS_AVD /* pipa: susfs 2.3.0 */
     susfs_add_sus_type(type_name, type->value);
 #endif // #ifdef CONFIG_KSU_SUSFS
     return true;
