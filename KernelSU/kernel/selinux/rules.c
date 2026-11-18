@@ -11,17 +11,17 @@ extern int avc_ss_reset(u32 seqno);
 extern int avc_ss_reset(struct selinux_avc *avc, u32 seqno);
 #endif
 // reset avc cache table, otherwise the new rules will not take effect if already denied
-static void reset_avc_cache(void)
+static void reset_avc_cache(u32 seqno)
 {
 #if ((!defined(KSU_COMPAT_USE_SELINUX_STATE)) || LINUX_VERSION_CODE >= KERNEL_VERSION(6, 4, 0))
-    avc_ss_reset(0);
-    selnl_notify_policyload(0);
-    selinux_status_update_policyload(0);
+    avc_ss_reset(seqno);
+    selnl_notify_policyload(seqno);
+    selinux_status_update_policyload(seqno);
 #else
     struct selinux_avc *avc = selinux_state.avc;
-    avc_ss_reset(avc, 0);
-    selnl_notify_policyload(0);
-    selinux_status_update_policyload(&selinux_state, 0);
+    avc_ss_reset(avc, seqno);
+    selnl_notify_policyload(seqno);
+    selinux_status_update_policyload(&selinux_state, seqno);
 #endif
     selinux_xfrm_notify_policyload();
 }
@@ -151,7 +151,7 @@ static int apply_kernelsu_rules_fn(void *ptr)
 
 void apply_kernelsu_rules(void)
 {
-    struct selinux_policy *pol __maybe_unused, *old_pol __maybe_unused; /* 5.10+ only */
+    struct selinux_policy *pol, *old_pol;
     struct policydb *db;
 
     if (!getenforce()) {
@@ -191,13 +191,17 @@ void apply_kernelsu_rules(void)
     }
     db = &pol->policydb;
 
+    pol->latest_granting = old_pol->latest_granting + 1;
+    if (!ksu_set_original_types(db, &old_pol->policydb, pol->latest_granting))
+        pr_warn("failed to save original type metadata, use backup lookups\n");
+
     apply_kernelsu_rules_fn((void *)db);
 
     rcu_assign_pointer(selinux_state.policy, pol);
     synchronize_rcu();
     ksu_destroy_sepolicy(old_pol);
 
-    reset_avc_cache();
+    reset_avc_cache(pol->latest_granting);
 #ifdef CONFIG_KSU_SUSFS
     susfs_set_batch_sid();
 #endif
@@ -254,10 +258,8 @@ do_stop_machine:
 
 out_flush:
     smp_mb();
-    reset_avc_cache();
+    reset_avc_cache(0);
 #ifdef CONFIG_KSU_SUSFS
-    /* pipa-cos17: upstream calls this only in the 5.10+ branch; without it susfs_zygote_sid stays 0 and the
-     * setresuid hook never recognises zygote (no manager fd, no umount/seccomp handling for apps) */
     susfs_set_batch_sid();
 #endif
 #endif
@@ -531,7 +533,7 @@ static int apply_one_sepolicy_cmd(struct policydb *db, const struct sepol_data *
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 10, 0)
 int handle_sepolicy(void __user *user_data, u64 data_len)
 {
-    struct selinux_policy *pol __maybe_unused, *old_pol __maybe_unused; /* 5.10+ only */
+    struct selinux_policy *pol, *old_pol;
     struct policydb *db;
     struct sepol_batch_cursor cursor;
     u8 *payload;
@@ -614,11 +616,15 @@ int handle_sepolicy(void __user *user_data, u64 data_len)
         cmd_index++;
     }
 
+    pol->latest_granting = old_pol->latest_granting + 1;
+    if (!ksu_advance_original_types(db, &old_pol->policydb, old_pol->latest_granting, pol->latest_granting))
+        pr_warn("failed to carry original type metadata, use backup lookups\n");
+
     rcu_assign_pointer(selinux_state.policy, pol);
     synchronize_rcu();
     ksu_destroy_sepolicy(old_pol);
 
-    reset_avc_cache();
+    reset_avc_cache(pol->latest_granting);
     ret = success_cmd_count;
     goto out_unlock;
 
@@ -773,7 +779,7 @@ out_done:
         goto out_free;
 
     smp_mb();
-    reset_avc_cache();
+    reset_avc_cache(0);
     ret = success_cmd_count;
 
 out_free:
