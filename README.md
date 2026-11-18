@@ -1,6 +1,6 @@
 # Kernel for the ColorOS 17 port on Xiaomi Pad 6 (pipa)
 
-Kernel `walt-r26` (Linux 4.19.325) for the ColorOS 17 port on the Xiaomi Pad 6 (`pipa`, SM8250 / SD870). `walt-r6` is
+Kernel `walt-hi9` (Linux 4.19.325; port release v9) for the ColorOS 17 port on the Xiaomi Pad 6 (`pipa`, SM8250 / SD870). `walt-r6` is
 the beta5 release. r7: keypad input devices only while the keypad is attached (nanosic), no NV MAC wait for Wi-Fi
 (cnss2), `ovnet` virtual netdev for OPPO interconnect network sharing. r8: SukiSU-Ultra builtin `85d3b048` (v4.3.0
 level, manager 41100) with 4.19 compat, susfs priority-uid-filter backport. r8kpm: r8 + KPM (KernelPatch 0.14.0,
@@ -24,6 +24,14 @@ process context). r23: OPPO memory path from the stock OPPO Pad 1 kernel (same S
 r24: OPPO hybridswap (`HYBRIDSWAP`, `_SWAPD`, `_CORE`: memcg-aware zram, `hybridswapd`, eswap to a loop file on
 /data = ColorOS RAM expansion; 7 Android vendor hooks, `android_oem_data1` in memcg and pgdat; `ZRAM_WRITEBACK` off as
 on stock). r26: hybridswapd stays idle while the panel is off, as on stock (pipa sends panel events through `mi_drm`).
+hi1: healthinfo-lite (`/proc/oplus_healthinfo/{cpu_loading,kswapd_loading}`, `/proc/fg_info/fg_uids` for ColorOS
+services). hi3: `sched_assist` GPU-composition scene always on (`gpu_comp_static=1`), so the stock perf HAL cannot move
+SurfaceFlinger to the little cores. hi5: NT36532 resends the touch features (Game Space Ultra touch, game sliders, edge,
+orientation) and restores the probe touch state after each resume firmware download. hi8: after a refresh-rate drop
+(dfps 90 -> 60) the display keeps maximum MDP clock and bandwidth for 8 frames / 200 ms (fixes SDE underruns = lines
+across the screen with O+ Connect PC Extend); `pipa_vrr_boost`, `pipa_vrr_log` in `/sys/module/msm_drm/parameters/`.
+hi9: SukiSU Nova builtin `4bec532d` (renamed SukiSU-Ultra, kernel version 30691, manager `com.sukisu.nova` v3.0.0)
+with 4.19 fixes; susfs v2.3.0. The port release v9 (2026-11-19) ships hi9.
 Branch `oppo` is what the port ships; branch `own` is the same kernel without OPPO's UI First scheduler code.
 
 ## What it is made of
