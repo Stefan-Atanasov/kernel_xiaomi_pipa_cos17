@@ -362,6 +362,7 @@ struct sde_crtc {
 	u32 perf_last_vrefresh;
 	u32 perf_boost_frames;
 	u32 perf_log_frames;
+	struct delayed_work perf_boost_work;
 
 	u32 plane_mask_old;
 

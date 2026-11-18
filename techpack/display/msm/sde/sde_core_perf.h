@@ -122,6 +122,9 @@ void sde_core_perf_crtc_update(struct drm_crtc *crtc,
  */
 void sde_core_perf_crtc_release_bw(struct drm_crtc *crtc);
 
+/* pipa: refresh-drop clock boost timer (BUGS 133) */
+void sde_core_perf_crtc_boost_init(struct drm_crtc *crtc);
+
 /**
  * sde_core_perf_crtc_update_uidle - attempts to enable uidle of the given crtc
  * @crtc: Pointer to crtc

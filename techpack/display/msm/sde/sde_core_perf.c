@@ -935,11 +935,12 @@ static void _sde_core_perf_crtc_update_check(struct drm_crtc *crtc,
  * are long, so the HWC clk/bw votes are low; 60 Hz runs its active lines at the 120 Hz line rate. A 90 -> 60 switch
  * underran the first 3-6 frames (dmesg, O+ Connect PC extend; 120 -> 60 never did). On a refresh drop vote the
  * max MDP core clock and bus bw for pipa_vrr_boost frame-dones (0 = off), then the normal votes come back.
- * Test build: a boost cut short by a static screen stays until the next commit.
+ * A timer ends the boost after SDE_PERF_VRR_BOOST_MS also when the screen goes static (no more frame-dones).
  */
+#define SDE_PERF_VRR_BOOST_MS 200
 static int pipa_vrr_boost = 8;
 module_param(pipa_vrr_boost, int, 0644);
-static int pipa_vrr_log = 1;
+static int pipa_vrr_log;
 module_param(pipa_vrr_log, int, 0644);
 
 static void _sde_core_perf_vrr_boost(struct sde_kms *kms,
@@ -961,8 +962,11 @@ static void _sde_core_perf_vrr_boost(struct sde_kms *kms,
 				sde_crtc->cur_perf.max_per_pipe_ib[e]);
 			sde_crtc->perf_log_frames = 12;
 		}
-		if (vrefresh < last && pipa_vrr_boost > 0)
+		if (vrefresh < last && pipa_vrr_boost > 0) {
 			sde_crtc->perf_boost_frames = pipa_vrr_boost;
+			mod_delayed_work(system_wq, &sde_crtc->perf_boost_work,
+				msecs_to_jiffies(SDE_PERF_VRR_BOOST_MS));
+		}
 	} else if (sde_crtc->perf_log_frames) {
 		sde_crtc->perf_log_frames--;
 		pr_info("pipa vrr %u clk %llu ebi ab %llu ib %llu boost %u\n",
@@ -982,6 +986,27 @@ static void _sde_core_perf_vrr_boost(struct sde_kms *kms,
 	}
 	p->core_clk_rate = max_t(u64, p->core_clk_rate,
 			kms->perf.max_core_clk_rate);
+}
+
+static void _sde_core_perf_boost_work(struct work_struct *work)
+{
+	struct sde_crtc *sde_crtc = container_of(to_delayed_work(work),
+			struct sde_crtc, perf_boost_work);
+	bool on;
+
+	mutex_lock(&sde_core_perf_lock);
+	on = sde_crtc->perf_boost_frames &&
+		_sde_core_perf_crtc_is_power_on(&sde_crtc->base);
+	sde_crtc->perf_boost_frames = on;  /* the update below ends it */
+	mutex_unlock(&sde_core_perf_lock);
+	if (on)
+		sde_core_perf_crtc_update(&sde_crtc->base, 0, false);
+}
+
+void sde_core_perf_crtc_boost_init(struct drm_crtc *crtc)
+{
+	INIT_DELAYED_WORK(&to_sde_crtc(crtc)->perf_boost_work,
+			_sde_core_perf_boost_work);
 }
 
 void sde_core_perf_crtc_update(struct drm_crtc *crtc,
@@ -1039,6 +1064,7 @@ void sde_core_perf_crtc_update(struct drm_crtc *crtc,
 				&update_bus, &update_clk, &update_llcc);
 	} else {
 		SDE_DEBUG("crtc=%d disable\n", crtc->base.id);
+		sde_crtc->perf_boost_frames = 0;
 		memset(old, 0, sizeof(*old));
 		memset(new, 0, sizeof(*new));
 		update_bus = ~0;

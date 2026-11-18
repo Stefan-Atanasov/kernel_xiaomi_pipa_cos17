@@ -439,6 +439,7 @@ static void sde_crtc_destroy(struct drm_crtc *crtc)
 	if (!crtc)
 		return;
 
+	cancel_delayed_work_sync(&sde_crtc->perf_boost_work);
 	if (sde_crtc->vsync_event_sf)
 		sysfs_put(sde_crtc->vsync_event_sf);
 	if (sde_crtc->retire_frame_event_sf)
@@ -6762,6 +6763,7 @@ struct drm_crtc *sde_crtc_init(struct drm_device *dev, struct drm_plane *plane)
 
 	kthread_init_delayed_work(&sde_crtc->idle_notify_work,
 					__sde_crtc_idle_notify_work);
+	sde_core_perf_crtc_boost_init(crtc);
 	kthread_init_delayed_work(&sde_crtc->idle_notify_work_cmd_mode,
 					__sde_crtc_idle_notify_work_cmd_mode);
 
