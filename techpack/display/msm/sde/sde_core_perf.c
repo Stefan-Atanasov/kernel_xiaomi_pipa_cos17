@@ -929,6 +929,61 @@ static void _sde_core_perf_crtc_update_check(struct drm_crtc *crtc,
 	}
 }
 
+/*
+ * pipa (BUGS 133, 2026-11-18): video-mode dynamic fps on the m82 panel makes 90/144 Hz by stretching the h front
+ * porch and 60/50/48/30 by stretching the v front porch (dsi_display_get_modes). At 90 Hz the lines
+ * are long, so the HWC clk/bw votes are low; 60 Hz runs its active lines at the 120 Hz line rate. A 90 -> 60 switch
+ * underran the first 3-6 frames (dmesg, O+ Connect PC extend; 120 -> 60 never did). On a refresh drop vote the
+ * max MDP core clock and bus bw for pipa_vrr_boost frame-dones (0 = off), then the normal votes come back.
+ * Test build: a boost cut short by a static screen stays until the next commit.
+ */
+static int pipa_vrr_boost = 8;
+module_param(pipa_vrr_boost, int, 0644);
+static int pipa_vrr_log = 1;
+module_param(pipa_vrr_log, int, 0644);
+
+static void _sde_core_perf_vrr_boost(struct sde_kms *kms,
+		struct drm_crtc *crtc)
+{
+	struct sde_crtc *sde_crtc = to_sde_crtc(crtc);
+	struct sde_core_perf_params *p = &sde_crtc->new_perf;
+	u32 vrefresh = crtc->state->adjusted_mode.vrefresh;
+	u32 last = sde_crtc->perf_last_vrefresh;
+	int e = SDE_POWER_HANDLE_DBUS_ID_EBI, i;
+
+	if (vrefresh && last && vrefresh != last) {
+		if (pipa_vrr_log) {
+			pr_info("pipa vrr %u->%u clk %llu->%llu ebi ab %llu ib %llu (cur ab %llu ib %llu)\n",
+				last, vrefresh,
+				sde_crtc->cur_perf.core_clk_rate, p->core_clk_rate,
+				p->bw_ctl[e], p->max_per_pipe_ib[e],
+				sde_crtc->cur_perf.bw_ctl[e],
+				sde_crtc->cur_perf.max_per_pipe_ib[e]);
+			sde_crtc->perf_log_frames = 12;
+		}
+		if (vrefresh < last && pipa_vrr_boost > 0)
+			sde_crtc->perf_boost_frames = pipa_vrr_boost;
+	} else if (sde_crtc->perf_log_frames) {
+		sde_crtc->perf_log_frames--;
+		pr_info("pipa vrr %u clk %llu ebi ab %llu ib %llu boost %u\n",
+			vrefresh, p->core_clk_rate, p->bw_ctl[e],
+			p->max_per_pipe_ib[e], sde_crtc->perf_boost_frames);
+	}
+	if (vrefresh)
+		sde_crtc->perf_last_vrefresh = vrefresh;
+
+	if (!sde_crtc->perf_boost_frames)
+		return;
+	for (i = 0; i < SDE_POWER_HANDLE_DBUS_ID_MAX; i++) {
+		p->bw_ctl[i] = max_t(u64, p->bw_ctl[i],
+				kms->catalog->perf.max_bw_high * 1000ULL);
+		p->max_per_pipe_ib[i] = max_t(u64, p->max_per_pipe_ib[i],
+				kms->catalog->perf.max_bw_high * 1000ULL);
+	}
+	p->core_clk_rate = max_t(u64, p->core_clk_rate,
+			kms->perf.max_core_clk_rate);
+}
+
 void sde_core_perf_crtc_update(struct drm_crtc *crtc,
 		int params_changed, bool stop_req)
 {
@@ -965,9 +1020,16 @@ void sde_core_perf_crtc_update(struct drm_crtc *crtc,
 	 * crtc kickoff, so the same numbers are used during the
 	 * perf update that happens post kickoff.
 	 */
-	if (params_changed)
+	if (params_changed) {
 		memcpy(&sde_crtc->new_perf, &sde_cstate->new_perf,
 			sizeof(struct sde_core_perf_params));
+		_sde_core_perf_vrr_boost(kms, crtc);
+	} else if (sde_crtc->perf_boost_frames &&
+			!--sde_crtc->perf_boost_frames) {
+		/* boost over: back to the HWC votes, lowered below */
+		memcpy(&sde_crtc->new_perf, &sde_cstate->new_perf,
+			sizeof(struct sde_core_perf_params));
+	}
 
 	old = &sde_crtc->cur_perf;
 	new = &sde_crtc->new_perf;

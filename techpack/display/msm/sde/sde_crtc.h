@@ -358,6 +358,10 @@ struct sde_crtc {
 
 	struct sde_core_perf_params cur_perf;
 	struct sde_core_perf_params new_perf;
+	/* pipa: refresh-drop clock boost (sde_core_perf.c) */
+	u32 perf_last_vrefresh;
+	u32 perf_boost_frames;
+	u32 perf_log_frames;
 
 	u32 plane_mask_old;
 
