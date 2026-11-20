@@ -117,6 +117,15 @@ static void vkey(unsigned int code)
 	input_sync(vdev);
 }
 
+void pipa_vkey_super(void)
+{
+	unsigned long flags;
+
+	spin_lock_irqsave(&pp_lock, flags);
+	vkey(KEY_F18);
+	spin_unlock_irqrestore(&pp_lock, flags);
+}
+
 static void long_fire(struct timer_list *t)
 {
 	int b = (t == &long_timer[B_FRONT]) ? B_FRONT : B_BACK;
@@ -278,6 +287,7 @@ static int __init pp_init(void)
 	vdev->phys = "pipa/pen";
 	vdev->id.bustype = BUS_VIRTUAL;
 	__set_bit(EV_KEY, vdev->evbit);
+	__set_bit(KEY_F18, vdev->keybit);   /* keyboard Super key alone (BUGS 155) */
 	for (b = 0; b < B_NUM; b++) {
 		__set_bit(page_code[b], vdev->keybit);
 		__set_bit(stylus_code[b], vdev->keybit);

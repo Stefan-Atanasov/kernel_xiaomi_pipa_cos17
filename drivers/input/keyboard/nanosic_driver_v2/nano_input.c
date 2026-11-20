@@ -27,6 +27,7 @@
 
 #include "nano_macro.h"
 #include "nano_input.h"
+#include "../../touchscreen/nt36532/pipa_pen_buttons.h"
 
 static struct hid_device * gVirtualConsumerDev;
 static struct hid_device * gVirtualKeyboardDev;
@@ -141,6 +142,71 @@ static struct nano_input_create_dev gTouchDevice =
     .bus     = BUS_VIRTUAL,
 };
 
+/*
+ * pipa (2026-11-20, BUGS 155): the Super key pressed alone runs an action that the user chose in Pipa Helper
+ * (ROM: pen_keys.sh on KEY_F18 of the pipa_pen_buttons device). Keyboard report: [05][modifiers][0][6 keys];
+ * Left GUI = bit 3, Right GUI = bit 7. super_alone = 1: a report with only Super is held back; Super released with
+ * nothing else -> no report at all (Android never sees the key) + KEY_F18; another key or modifier first -> the
+ * held report goes out before it (Super shortcuts unchanged); held longer than super_ms -> it goes out (Super held,
+ * ColorOS shortcut list). super_alone = 0 (default): stock.
+ */
+static int super_alone;
+module_param(super_alone, int, 0644);
+MODULE_PARM_DESC(super_alone, "1 = Super key alone -> KEY_F18 for the ROM (Pipa Helper), 0 = stock");
+static int super_ms = 400;
+module_param(super_ms, int, 0644);
+MODULE_PARM_DESC(super_ms, "Super held longer than this (ms) = a normal Super press");
+#define SUPER_BITS 0x88
+static u8 gSuperHeld[9];
+static bool gSuperPending;
+static u8 gLastMods;
+static struct delayed_work gSuperWork;
+
+/* gInputLock held. true = the report is consumed */
+static bool Nanosic_input_super_filter(const u8 *r, size_t len)
+{
+	bool keys, gui;
+	u8 mods;
+	int i;
+
+	if (len < 9 || r[0] != 0x05)
+		return false;
+	mods = r[1];
+	gui = mods & SUPER_BITS;
+	keys = false;
+	for (i = 3; i < 9; i++)
+		keys |= r[i] != 0;
+	if (!gSuperPending) {
+		if (super_alone > 0 && gui && !keys && !(mods & ~SUPER_BITS) && !(gLastMods & SUPER_BITS)) {
+			memcpy(gSuperHeld, r, 9);
+			gSuperPending = true;
+			gLastMods = mods;
+			mod_delayed_work(system_wq, &gSuperWork, msecs_to_jiffies(super_ms > 0 ? super_ms : 400));
+			return true;
+		}
+		gLastMods = mods;
+		return false;
+	}
+	gSuperPending = false;
+	cancel_delayed_work(&gSuperWork);
+	gLastMods = mods;
+	if (!gui && !keys && mods == 0) {
+		pipa_vkey_super();   /* Super alone: Android never saw it */
+		return true;
+	}
+	hid_input_report(gVirtualKeyboardDev, HID_INPUT_REPORT, gSuperHeld, 9, 0);   /* a Super shortcut */
+	return false;
+}
+
+static void Nanosic_input_super_work(struct work_struct *work)
+{
+	mutex_lock(&gInputLock);
+	if (gSuperPending && gInputAttached && !gFoldOff && gVirtualKeyboardDev)
+		hid_input_report(gVirtualKeyboardDev, HID_INPUT_REPORT, gSuperHeld, 9, 0);
+	gSuperPending = false;
+	mutex_unlock(&gInputLock);
+}
+
 /** **************************************************************************
  * @brief Nanosic_input_write
  *        data inject to input layer , 键盘,鼠标,多指数据的注入
@@ -170,6 +236,10 @@ Nanosic_input_write(EM_PacketType type ,void *buf, size_t len)
 	{
 		case EM_PACKET_KEYBOARD:
             //dbgprint(DEBUG_LEVEL,"report keyboard event\n");
+            if (Nanosic_input_super_filter(buf, len)) {
+                ret = 0;
+                break;
+            }
             ret = hid_input_report(gVirtualKeyboardDev, HID_INPUT_REPORT, buf,min_t(size_t, len, 100), 0);
             if(ret)
                 dbgprint(ERROR_LEVEL,"Nanosic_input_write：report keyboard event err: %d \n",ret);
@@ -478,6 +548,8 @@ Nanosic_input_detach(void)
 	if(!gInputAttached)
 		return;
 
+	gSuperPending = false;
+	gLastMods = 0;
 	hid_destroy_device(gVirtualKeyboardDev);
 	hid_destroy_device(gVirtualMouseDev);
 	hid_destroy_device(gVirtualTouchDev);
@@ -510,6 +582,8 @@ Nanosic_input_fold_work(struct work_struct *work)
 	mutex_lock(&gInputLock);
 	if(gFoldReq && !gFoldOff && gPanelOn){
 		gFoldOff = true;
+		gSuperPending = false;
+		gLastMods = 0;
 		if(gInputAttached && gCapsLock)
 			Nanosic_input_caps_send(false);
 		if(gInputAttached){
@@ -606,6 +680,7 @@ Nanosic_input_register(void)
 	INIT_WORK(&gInputWork, Nanosic_input_work);
 	INIT_DELAYED_WORK(&gFoldWork, Nanosic_input_fold_work);
 	INIT_DELAYED_WORK(&gCapsWork, Nanosic_input_caps_work);
+	INIT_DELAYED_WORK(&gSuperWork, Nanosic_input_super_work);
 	return 0;
 }
 
