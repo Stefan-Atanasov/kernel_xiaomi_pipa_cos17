@@ -1,6 +1,6 @@
 # Kernel for the ColorOS 17 port on Xiaomi Pad 6 (pipa)
 
-Kernel `walt-hi9` (Linux 4.19.325; port release v9) for the ColorOS 17 port on the Xiaomi Pad 6 (`pipa`, SM8250 / SD870). `walt-r6` is
+Kernel `walt-hi13` (Linux 4.19.325; port release v9.2) for the ColorOS 17 port on the Xiaomi Pad 6 (`pipa`, SM8250 / SD870). `walt-r6` is
 the beta5 release. r7: keypad input devices only while the keypad is attached (nanosic), no NV MAC wait for Wi-Fi
 (cnss2), `ovnet` virtual netdev for OPPO interconnect network sharing. r8: SukiSU-Ultra builtin `85d3b048` (v4.3.0
 level, manager 41100) with 4.19 compat, susfs priority-uid-filter backport. r8kpm: r8 + KPM (KernelPatch 0.14.0,
@@ -32,6 +32,12 @@ orientation) and restores the probe touch state after each resume firmware downl
 across the screen with O+ Connect PC Extend); `pipa_vrr_boost`, `pipa_vrr_log` in `/sys/module/msm_drm/parameters/`.
 hi9: SukiSU Nova builtin `4bec532d` (renamed SukiSU-Ultra, kernel version 30691, manager `com.sukisu.nova` v3.0.0)
 with 4.19 fixes; susfs v2.3.0. The port release v9 (2026-11-19) ships hi9.
+hi10: SDE refresh boost on every vrefresh change, also on a rise (60 -> 90 Hz MDP underrun = white flash on some
+Tianma panels). hi11: keyboard cover Caps Lock LED from the HID LED report (MCU feature 0x26 as HyperOS), off before
+the keypad MCU sleeps at screen off. hi12: pen buttons once: display path = BTN_STYLUS/2 in the pen events, Bluetooth
+keys filtered by distance; far_mode 3 = custom short / double press actions (KEY_F19-F22), short press also KEY_F13/F14
+(OPPO pencil click). hi13: keyboard Super key alone -> KEY_F18 on pipa_pen_buttons (super_alone; Super shortcuts
+stay). The port release v9.2 (2026-11-21) ships hi13.
 Branch `oppo` is what the port ships; branch `own` is the same kernel without OPPO's UI First scheduler code.
 
 ## What it is made of
