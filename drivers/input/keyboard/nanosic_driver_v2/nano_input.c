@@ -277,6 +277,48 @@ Nanosic_input_raw_request (struct hid_device *hdev, unsigned char reportnum,
     return len;
 }
 
+/*
+ * pipa (2026-11-20, BUGS 151): caps lock LED. hid-input sends the keyboard LED output report here
+ * (report ID 5, byte 1 bit 1 = caps lock). HyperOS lights the LED from miui-services
+ * (IICNodeHelper.setKeyboardFeature: MCU feature 0x26, value 1/0; FD/FC only for keyboard type 33,
+ * the touchpad keyboard) through the vendor nano socket; the port has no such framework, so the
+ * driver sends the same MCU command: 32 00 4E 31 80 38 26 01 <value> <sum of bytes 2..8>.
+ * Like HyperOS the LED is off while the keypad is folded away. caps_led_on/off: values to send.
+ */
+static int caps_led_on = 0x01;
+module_param(caps_led_on, int, 0644);
+static int caps_led_off = 0x00;
+module_param(caps_led_off, int, 0644);
+static bool gCapsLock;
+static struct delayed_work gCapsWork;
+
+static void
+Nanosic_input_caps_send(bool on)
+{
+	u8 cmd[I2C_DATA_LENGTH_WRITE] = { 0x32, 0x00, 0x4E, 0x31, 0x80, 0x38, 0x26, 0x01 };
+	u8 sum = 0;
+	int i;
+
+	cmd[8] = (u8)(on ? caps_led_on : caps_led_off);
+	for(i = 2; i < 9; i++)
+		sum += cmd[i];
+	cmd[9] = sum;
+	if(Nanosic_i2c_write(gI2c_client, cmd, sizeof(cmd)) < 0)
+		dbgprint(ERROR_LEVEL, "caps lock led %d: i2c write failed\n", on);
+	else
+		dbgprint(ALERT_LEVEL, "caps lock led %d\n", on);
+}
+
+/* the LED as the keypad should show it now (keyboard device present, not folded away) */
+static void
+Nanosic_input_caps_work(struct work_struct *work)
+{
+	mutex_lock(&gInputLock);
+	if(gInputAttached)
+		Nanosic_input_caps_send(gCapsLock && !gFoldOff);
+	mutex_unlock(&gInputLock);
+}
+
 /** ************************************************************************//**
  *  @func Nanosic_input_set_report
  *
@@ -300,6 +342,13 @@ Nanosic_input_set_report(struct hid_device *hid, __u8 *buf, size_t size)
     if(IS_ERR(buf)){
         dbgprint(ERROR_LEVEL, "Invaild argment\n");
         return -EINVAL;
+    }
+
+    if(size >= 2 && buf[0] == 0x05 && hid == gVirtualKeyboardDev){
+        /* keyboard LED output report: caps lock is bit 1 */
+        gCapsLock = !!(buf[1] & 0x02);
+        mod_delayed_work(system_wq, &gCapsWork, 0);
+        return size;
     }
 
     rawdata_show("would not write i2c cmd" ,buf , size);
@@ -450,6 +499,8 @@ Nanosic_input_fold_work(struct work_struct *work)
 	mutex_lock(&gInputLock);
 	if(gFoldReq && !gFoldOff && gPanelOn){
 		gFoldOff = true;
+		if(gInputAttached && gCapsLock)
+			Nanosic_input_caps_send(false);
 		if(gInputAttached){
 			if(fold_remove){
 				Nanosic_input_detach();
@@ -483,6 +534,8 @@ Nanosic_input_set_enabled(bool enabled)
 			gFoldOff = false;
 			if(gInputWant && !gInputAttached)
 				Nanosic_input_attach();
+			if(gCapsLock)
+				mod_delayed_work(system_wq, &gCapsWork, 0);
 			dbgprint(ALERT_LEVEL,"keypad unfolded, input on\n");
 		}
 	}else if(!gFoldOff && gPanelOn){
@@ -505,6 +558,9 @@ Nanosic_input_panel(bool on)
 {
 	mutex_lock(&gInputLock);
 	gPanelOn = on;
+	/* the keypad MCU sleeps with the screen: give the caps lock LED back after the wake */
+	if(on && gCapsLock)
+		mod_delayed_work(system_wq, &gCapsWork, msecs_to_jiffies(500));
 	if(!on)
 		cancel_delayed_work(&gFoldWork);
 	else if(gFoldReq && !gFoldOff)
@@ -538,6 +594,7 @@ Nanosic_input_register(void)
 {
 	INIT_WORK(&gInputWork, Nanosic_input_work);
 	INIT_DELAYED_WORK(&gFoldWork, Nanosic_input_fold_work);
+	INIT_DELAYED_WORK(&gCapsWork, Nanosic_input_caps_work);
 	return 0;
 }
 
