@@ -12,7 +12,9 @@
  * - a press that starts while the display sees the pen is dropped: the display reports it;
  * - a press that starts with the pen away goes to the virtual device "pipa_pen_buttons". A short press (released
  *   before long_ms) gives KEY_PAGEDOWN/KEY_PAGEUP (far_mode 1, as on HyperOS) or BTN_STYLUS/BTN_STYLUS2
- *   (far_mode 2) or KEY_F21/KEY_F22 (far_mode 3, the ROM runs the chosen short-press actions). A press held for
+ *   (far_mode 2) or KEY_F21/KEY_F22 (far_mode 3, the ROM runs the chosen short-press actions; with double_ms > 0
+ *   a second press within double_ms gives KEY_F19/KEY_F20 instead, the single press then comes after double_ms).
+ *   A press held for
  *   long_ms gives KEY_F23 (front) / KEY_F24 (back) at that moment: the ROM
  *   (pen_keys.sh) runs the long-press actions (quick note, screenshot). nt36xxx.c does not report a button
  *   while its press belongs to this path (pipa_pen_far_mask).
@@ -35,6 +37,9 @@ MODULE_PARM_DESC(far_mode, "pen away: 0 = buttons off, 1 = page down/up, 2 = sty
 static int long_ms = 380;
 module_param(long_ms, int, 0644);
 MODULE_PARM_DESC(long_ms, "hold time of a long press (ms)");
+static int double_ms;
+module_param(double_ms, int, 0644);
+MODULE_PARM_DESC(double_ms, "far_mode 3: wait this long for a second press (ms, 0 = no double press)");
 static int range_ms = 150;
 module_param(range_ms, int, 0644);
 MODULE_PARM_DESC(range_ms, "the pen counts as near for this time after its last display frame (ms)");
@@ -46,13 +51,15 @@ static const unsigned int bt_code[B_NUM] = { KEY_PAGEDOWN, KEY_PAGEUP };
 static const unsigned int page_code[B_NUM] = { KEY_PAGEDOWN, KEY_PAGEUP };
 static const unsigned int stylus_code[B_NUM] = { BTN_STYLUS, BTN_STYLUS2 };
 static const unsigned int custom_code[B_NUM] = { KEY_F21, KEY_F22 };
+static const unsigned int double_code[B_NUM] = { KEY_F19, KEY_F20 };
 static const unsigned int long_code[B_NUM] = { KEY_F23, KEY_F24 };
 
 static DEFINE_SPINLOCK(pp_lock);
 static unsigned long last_frame;
 static bool seen_frame;
 static int state[B_NUM];
-static struct timer_list long_timer[B_NUM];
+static struct timer_list long_timer[B_NUM], dbl_timer[B_NUM];
+static bool pend[B_NUM];   /* far_mode 3: a short press waits for a second one */
 static struct input_dev *vdev;
 
 void pipa_pen_frame(void)
@@ -97,7 +104,24 @@ static void long_fire(struct timer_list *t)
 	spin_lock_irqsave(&pp_lock, flags);
 	if (state[b] == ST_FAR) {
 		state[b] = ST_FAR_LONG;
+		if (pend[b]) {   /* tap, then hold: the hold wins */
+			del_timer(&dbl_timer[b]);
+			pend[b] = false;
+		}
 		vkey(long_code[b]);
+	}
+	spin_unlock_irqrestore(&pp_lock, flags);
+}
+
+static void dbl_fire(struct timer_list *t)
+{
+	int b = (t == &dbl_timer[B_FRONT]) ? B_FRONT : B_BACK;
+	unsigned long flags;
+
+	spin_lock_irqsave(&pp_lock, flags);
+	if (pend[b]) {
+		pend[b] = false;
+		vkey(custom_code[b]);
 	}
 	spin_unlock_irqrestore(&pp_lock, flags);
 }
@@ -127,7 +151,18 @@ static bool pp_filter(struct input_handle *handle, unsigned int type, unsigned i
 	} else if (value == 0) {
 		if (state[b] == ST_FAR) {
 			del_timer(&long_timer[b]);
-			vkey(far_mode == 3 ? custom_code[b] : far_mode == 2 ? stylus_code[b] : page_code[b]);
+			if (far_mode == 3 && double_ms > 0) {
+				if (pend[b]) {
+					del_timer(&dbl_timer[b]);
+					pend[b] = false;
+					vkey(double_code[b]);
+				} else {
+					pend[b] = true;
+					mod_timer(&dbl_timer[b], jiffies + msecs_to_jiffies(double_ms));
+				}
+			} else {
+				vkey(far_mode == 3 ? custom_code[b] : far_mode == 2 ? stylus_code[b] : page_code[b]);
+			}
 		}
 		state[b] = ST_IDLE;
 	}
@@ -176,6 +211,8 @@ static void pp_disconnect(struct input_handle *handle)
 	spin_lock_irqsave(&pp_lock, flags);
 	for (b = 0; b < B_NUM; b++) {
 		del_timer(&long_timer[b]);
+		del_timer(&dbl_timer[b]);
+		pend[b] = false;
 		state[b] = ST_IDLE;
 	}
 	spin_unlock_irqrestore(&pp_lock, flags);
@@ -214,8 +251,10 @@ static int __init pp_init(void)
 		__set_bit(page_code[b], vdev->keybit);
 		__set_bit(stylus_code[b], vdev->keybit);
 		__set_bit(custom_code[b], vdev->keybit);
+		__set_bit(double_code[b], vdev->keybit);
 		__set_bit(long_code[b], vdev->keybit);
 		timer_setup(&long_timer[b], long_fire, 0);
+		timer_setup(&dbl_timer[b], dbl_fire, 0);
 	}
 	err = input_register_device(vdev);
 	if (err) {
