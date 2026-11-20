@@ -17,7 +17,7 @@
  *   A press held for
  *   long_ms gives KEY_F23 (front) / KEY_F24 (back) at that moment: the ROM
  *   (pen_keys.sh) runs the long-press actions (quick note, screenshot). nt36xxx.c does not report a button
- *   while its press belongs to this path (pipa_pen_far_mask).
+ *   while its press belongs to this path, nor just after it (pipa_pen_display_buttons).
  * - far_mode 0: the Bluetooth keys are dropped (LineageOS behaviour: display only).
  * HyperOS: MiuiStylusShortcutManager, LONG_PRESS_TIME_OUT 380 ms, long PAGE_UP = screenshot, long PAGE_DOWN =
  * quick note. Public pipa trees ignore the Bluetooth keys (LineageOS sm8250-common 3ea0dc949a).
@@ -60,6 +60,7 @@ static bool seen_frame;
 static int state[B_NUM];
 static struct timer_list long_timer[B_NUM], dbl_timer[B_NUM];
 static bool pend[B_NUM];   /* far_mode 3: a short press waits for a second one */
+static bool tail[B_NUM];   /* a press of the Bluetooth path ended: the display still shows it for a few frames */
 static struct input_dev *vdev;
 
 void pipa_pen_frame(void)
@@ -74,15 +75,30 @@ static bool pen_near(void)
 		time_before(jiffies, READ_ONCE(last_frame) + msecs_to_jiffies(range_ms));
 }
 
-unsigned int pipa_pen_far_mask(void)
+/*
+ * the buttons the display may report (bit 0 front, bit 1 back): not while a press belongs to the Bluetooth path,
+ * and not after it until the display shows the button released (its frames come ~20 ms later: a pen that moved
+ * into range during a press gave a page key plus a 17 ms stylus button, test 2026-11-20)
+ */
+unsigned int pipa_pen_display_buttons(unsigned int raw)
 {
-	unsigned int m = 0;
+	unsigned long flags;
+	unsigned int out = raw;
 	int b;
 
-	for (b = 0; b < B_NUM; b++)
-		if (READ_ONCE(state[b]) >= ST_FAR)
-			m |= BIT(b);
-	return m;
+	spin_lock_irqsave(&pp_lock, flags);
+	for (b = 0; b < B_NUM; b++) {
+		if (state[b] >= ST_FAR) {
+			out &= ~BIT(b);
+		} else if (tail[b]) {
+			if (raw & BIT(b))
+				out &= ~BIT(b);
+			else
+				tail[b] = false;
+		}
+	}
+	spin_unlock_irqrestore(&pp_lock, flags);
+	return out;
 }
 
 /* press and release of one key on the virtual device; pp_lock held */
@@ -149,6 +165,8 @@ static bool pp_filter(struct input_handle *handle, unsigned int type, unsigned i
 			mod_timer(&long_timer[b], jiffies + msecs_to_jiffies(long_ms > 0 ? long_ms : 380));
 		}
 	} else if (value == 0) {
+		if (state[b] >= ST_FAR)
+			tail[b] = true;
 		if (state[b] == ST_FAR) {
 			del_timer(&long_timer[b]);
 			if (far_mode == 3 && double_ms > 0) {
@@ -213,6 +231,7 @@ static void pp_disconnect(struct input_handle *handle)
 		del_timer(&long_timer[b]);
 		del_timer(&dbl_timer[b]);
 		pend[b] = false;
+		tail[b] = false;
 		state[b] = ST_IDLE;
 	}
 	spin_unlock_irqrestore(&pp_lock, flags);

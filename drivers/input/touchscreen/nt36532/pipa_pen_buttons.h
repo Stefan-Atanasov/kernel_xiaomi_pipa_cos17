@@ -4,7 +4,7 @@
 
 /* the display sent a pen frame: the pen is in hover range now */
 void pipa_pen_frame(void);
-/* buttons whose press started with the pen away (bit 0 front, bit 1 back): the display does not report them */
-unsigned int pipa_pen_far_mask(void);
+/* raw display buttons (bit 0 front, bit 1 back) -> the ones the display may report (see pipa_pen_buttons.c) */
+unsigned int pipa_pen_display_buttons(unsigned int raw);
 
 #endif

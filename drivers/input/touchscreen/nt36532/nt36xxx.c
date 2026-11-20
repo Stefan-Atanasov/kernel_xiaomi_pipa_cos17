@@ -2052,9 +2052,9 @@ static irqreturn_t nvt_ts_work_func(int irq, void *data)
 				/* pipa (BUGS 153): stylus buttons in the pen events; a press that started with the pen
 				 * away belongs to the Bluetooth path (pipa_pen_buttons.c) and is not reported here */
 				pipa_pen_frame();
-				pen_far = pipa_pen_far_mask();
-				input_report_key(ts->pen_input_dev, BTN_STYLUS, pen_btn1 && !(pen_far & 1));
-				input_report_key(ts->pen_input_dev, BTN_STYLUS2, pen_btn2 && !(pen_far & 2));
+				pen_far = pipa_pen_display_buttons((pen_btn1 ? 1 : 0) | (pen_btn2 ? 2 : 0));
+				input_report_key(ts->pen_input_dev, BTN_STYLUS, !!(pen_far & 1));
+				input_report_key(ts->pen_input_dev, BTN_STYLUS2, !!(pen_far & 2));
 				// TBD: pen battery event report
 				// NVT_LOG("pen_battery=%d\n", pen_battery);
 			} else if (pen_format_id == 0xF0) {
