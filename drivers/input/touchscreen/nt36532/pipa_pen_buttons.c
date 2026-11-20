@@ -12,7 +12,8 @@
  * - a press that starts while the display sees the pen is dropped: the display reports it;
  * - a press that starts with the pen away goes to the virtual device "pipa_pen_buttons". A short press (released
  *   before long_ms) gives KEY_PAGEDOWN/KEY_PAGEUP (far_mode 1, as on HyperOS) or BTN_STYLUS/BTN_STYLUS2
- *   (far_mode 2). A press held for long_ms gives KEY_F23 (front) / KEY_F24 (back) at that moment: the ROM
+ *   (far_mode 2) or KEY_F21/KEY_F22 (far_mode 3, the ROM runs the chosen short-press actions). A press held for
+ *   long_ms gives KEY_F23 (front) / KEY_F24 (back) at that moment: the ROM
  *   (pen_keys.sh) runs the long-press actions (quick note, screenshot). nt36xxx.c does not report a button
  *   while its press belongs to this path (pipa_pen_far_mask).
  * - far_mode 0: the Bluetooth keys are dropped (LineageOS behaviour: display only).
@@ -30,7 +31,7 @@
 
 static int far_mode = 1;
 module_param(far_mode, int, 0644);
-MODULE_PARM_DESC(far_mode, "pen away: 0 = buttons off, 1 = page down/up, 2 = stylus buttons");
+MODULE_PARM_DESC(far_mode, "pen away: 0 = buttons off, 1 = page down/up, 2 = stylus buttons, 3 = custom (F21/F22)");
 static int long_ms = 380;
 module_param(long_ms, int, 0644);
 MODULE_PARM_DESC(long_ms, "hold time of a long press (ms)");
@@ -44,6 +45,7 @@ enum { ST_IDLE, ST_NEAR, ST_FAR, ST_FAR_LONG };
 static const unsigned int bt_code[B_NUM] = { KEY_PAGEDOWN, KEY_PAGEUP };
 static const unsigned int page_code[B_NUM] = { KEY_PAGEDOWN, KEY_PAGEUP };
 static const unsigned int stylus_code[B_NUM] = { BTN_STYLUS, BTN_STYLUS2 };
+static const unsigned int custom_code[B_NUM] = { KEY_F21, KEY_F22 };
 static const unsigned int long_code[B_NUM] = { KEY_F23, KEY_F24 };
 
 static DEFINE_SPINLOCK(pp_lock);
@@ -125,7 +127,7 @@ static bool pp_filter(struct input_handle *handle, unsigned int type, unsigned i
 	} else if (value == 0) {
 		if (state[b] == ST_FAR) {
 			del_timer(&long_timer[b]);
-			vkey(far_mode == 2 ? stylus_code[b] : page_code[b]);
+			vkey(far_mode == 3 ? custom_code[b] : far_mode == 2 ? stylus_code[b] : page_code[b]);
 		}
 		state[b] = ST_IDLE;
 	}
@@ -211,6 +213,7 @@ static int __init pp_init(void)
 	for (b = 0; b < B_NUM; b++) {
 		__set_bit(page_code[b], vdev->keybit);
 		__set_bit(stylus_code[b], vdev->keybit);
+		__set_bit(custom_code[b], vdev->keybit);
 		__set_bit(long_code[b], vdev->keybit);
 		timer_setup(&long_timer[b], long_fire, 0);
 	}
