@@ -933,8 +933,9 @@ static void _sde_core_perf_crtc_update_check(struct drm_crtc *crtc,
  * pipa (BUGS 133, 2026-11-18): video-mode dynamic fps on the m82 panel makes 90/144 Hz by stretching the h front
  * porch and 60/50/48/30 by stretching the v front porch (dsi_display_get_modes). At 90 Hz the lines
  * are long, so the HWC clk/bw votes are low; 60 Hz runs its active lines at the 120 Hz line rate. A 90 -> 60 switch
- * underran the first 3-6 frames (dmesg, O+ Connect PC extend; 120 -> 60 never did). On a refresh drop vote the
- * max MDP core clock and bus bw for pipa_vrr_boost frame-dones (0 = off), then the normal votes come back.
+ * underran the first 3-6 frames (dmesg, O+ Connect PC extend; 120 -> 60 never did). On every refresh change vote
+ * the max MDP core clock and bus bw for pipa_vrr_boost frame-dones (0 = off), then the normal votes come back.
+ * hi10 (BUGS 48, 2026-11-20): also on a rise; a tester tablet (Tianma panel) underran once after 60 -> 90.
  * A timer ends the boost after SDE_PERF_VRR_BOOST_MS also when the screen goes static (no more frame-dones).
  */
 #define SDE_PERF_VRR_BOOST_MS 200
@@ -962,7 +963,7 @@ static void _sde_core_perf_vrr_boost(struct sde_kms *kms,
 				sde_crtc->cur_perf.max_per_pipe_ib[e]);
 			sde_crtc->perf_log_frames = 12;
 		}
-		if (vrefresh < last && pipa_vrr_boost > 0) {
+		if (pipa_vrr_boost > 0) {
 			sde_crtc->perf_boost_frames = pipa_vrr_boost;
 			mod_delayed_work(system_wq, &sde_crtc->perf_boost_work,
 				msecs_to_jiffies(SDE_PERF_VRR_BOOST_MS));
