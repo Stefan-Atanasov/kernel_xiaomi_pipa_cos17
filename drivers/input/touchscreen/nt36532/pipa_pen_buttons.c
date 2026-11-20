@@ -19,6 +19,9 @@
  *   (pen_keys.sh) runs the long-press actions (quick note, screenshot). nt36xxx.c does not report a button
  *   while its press belongs to this path, nor just after it (pipa_pen_display_buttons).
  * - far_mode 0: the Bluetooth keys are dropped (LineageOS behaviour: display only).
+ * - a short press that is a stylus-button press (near the screen; away in far_mode 2) also gives KEY_F13 (front) /
+ *   KEY_F14 (back): the ROM sends it to the OPPO apps as an OPPO pencil click (IPeManager PENCIL_DOUBLE_CLICK /
+ *   PENCIL_SINGLE_CLICK: Notes switches pen and eraser). Apps that read stylus buttons are not changed.
  * HyperOS: MiuiStylusShortcutManager, LONG_PRESS_TIME_OUT 380 ms, long PAGE_UP = screenshot, long PAGE_DOWN =
  * quick note. Public pipa trees ignore the Bluetooth keys (LineageOS sm8250-common 3ea0dc949a).
  */
@@ -53,6 +56,7 @@ static const unsigned int stylus_code[B_NUM] = { BTN_STYLUS, BTN_STYLUS2 };
 static const unsigned int custom_code[B_NUM] = { KEY_F21, KEY_F22 };
 static const unsigned int double_code[B_NUM] = { KEY_F19, KEY_F20 };
 static const unsigned int long_code[B_NUM] = { KEY_F23, KEY_F24 };
+static const unsigned int click_code[B_NUM] = { KEY_F13, KEY_F14 };
 
 static DEFINE_SPINLOCK(pp_lock);
 static unsigned long last_frame;
@@ -61,6 +65,7 @@ static int state[B_NUM];
 static struct timer_list long_timer[B_NUM], dbl_timer[B_NUM];
 static bool pend[B_NUM];   /* far_mode 3: a short press waits for a second one */
 static bool tail[B_NUM];   /* a press of the Bluetooth path ended: the display still shows it for a few frames */
+static unsigned long t_down[B_NUM];
 static struct input_dev *vdev;
 
 void pipa_pen_frame(void)
@@ -158,6 +163,7 @@ static bool pp_filter(struct input_handle *handle, unsigned int type, unsigned i
 
 	spin_lock_irqsave(&pp_lock, flags);
 	if (value == 1 && state[b] == ST_IDLE) {
+		t_down[b] = jiffies;
 		if (far_mode <= 0 || pen_near()) {
 			state[b] = ST_NEAR;
 		} else {
@@ -165,6 +171,10 @@ static bool pp_filter(struct input_handle *handle, unsigned int type, unsigned i
 			mod_timer(&long_timer[b], jiffies + msecs_to_jiffies(long_ms > 0 ? long_ms : 380));
 		}
 	} else if (value == 0) {
+		bool quick = time_before(jiffies, t_down[b] + msecs_to_jiffies(long_ms > 0 ? long_ms : 380));
+
+		if (state[b] == ST_NEAR && quick)
+			vkey(click_code[b]);
 		if (state[b] >= ST_FAR)
 			tail[b] = true;
 		if (state[b] == ST_FAR) {
@@ -180,6 +190,8 @@ static bool pp_filter(struct input_handle *handle, unsigned int type, unsigned i
 				}
 			} else {
 				vkey(far_mode == 3 ? custom_code[b] : far_mode == 2 ? stylus_code[b] : page_code[b]);
+				if (far_mode == 2)
+					vkey(click_code[b]);
 			}
 		}
 		state[b] = ST_IDLE;
@@ -272,6 +284,7 @@ static int __init pp_init(void)
 		__set_bit(custom_code[b], vdev->keybit);
 		__set_bit(double_code[b], vdev->keybit);
 		__set_bit(long_code[b], vdev->keybit);
+		__set_bit(click_code[b], vdev->keybit);
 		timer_setup(&long_timer[b], long_fire, 0);
 		timer_setup(&dbl_timer[b], dbl_fire, 0);
 	}
