@@ -237,6 +237,7 @@ extern int  Nanosic_input_release(void);
 extern int  Nanosic_input_write(EM_PacketType type ,void *buf, size_t len);
 extern void Nanosic_input_hall_status(bool connected);
 extern void Nanosic_input_set_enabled(bool enabled);
+extern void Nanosic_input_caps_sleep(void);
 extern void Nanosic_input_panel(bool on);
 extern int  Nanosic_GPIO_recovery(struct nano_i2c_client* client , char* data, int datalen);
 extern int  Nanosic_GPIO_register(int vdd_pin, int reset_pin, int status_pin, int irq_pin,int sleep_pin);

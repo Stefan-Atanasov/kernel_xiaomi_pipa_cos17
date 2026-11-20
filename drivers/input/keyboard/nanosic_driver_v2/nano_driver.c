@@ -296,6 +296,7 @@ static void keyboard_resume_work(struct work_struct *work)
 static void keyboard_suspend_work(struct work_struct *work)
 {
     dbgprint(ALERT_LEVEL,"keyboard_suspend_work: enter\n");
+    Nanosic_input_caps_sleep();
     Nanosic_GPIO_sleep(false);
     g_panel_status = false;
     Nanosic_input_panel(false);
