@@ -319,6 +319,17 @@ Nanosic_input_caps_work(struct work_struct *work)
 	mutex_unlock(&gInputLock);
 }
 
+/* screen off: the keypad MCU goes to sleep next, switch the LED off first (HyperOS does too) */
+void
+Nanosic_input_caps_sleep(void)
+{
+	cancel_delayed_work_sync(&gCapsWork);
+	mutex_lock(&gInputLock);
+	if(gInputAttached && gCapsLock && !gFoldOff)
+		Nanosic_input_caps_send(false);
+	mutex_unlock(&gInputLock);
+}
+
 /** ************************************************************************//**
  *  @func Nanosic_input_set_report
  *
