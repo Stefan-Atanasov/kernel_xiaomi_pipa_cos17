@@ -32,6 +32,11 @@ orientation) and restores the probe touch state after each resume firmware downl
 across the screen with O+ Connect PC Extend); `pipa_vrr_boost`, `pipa_vrr_log` in `/sys/module/msm_drm/parameters/`.
 hi9: SukiSU Nova builtin `4bec532d` (renamed SukiSU-Ultra, kernel version 30691, manager `com.sukisu.nova` v3.0.0)
 with 4.19 fixes; susfs v2.3.0. The port release v9 (2026-11-19) ships hi9.
+
+Branch `hi11-test` (test build for testers, not a release): hi10: the MDP clock and bandwidth boost runs after every
+refresh-rate change, also after a rise (one 60 -> 90 Hz underrun = short white flash on a Tianma panel). hi11: the
+Xiaomi keyboard case Caps Lock LED (the HID LED output report is sent to the keypad MCU as feature 0x26, as HyperOS
+does; off while the keypad is folded back or the screen is off; `/sys/module/nanosic_driver_v2/parameters/caps_led_on|off`).
 Branch `oppo` is what the port ships; branch `own` is the same kernel without OPPO's UI First scheduler code.
 
 ## What it is made of
